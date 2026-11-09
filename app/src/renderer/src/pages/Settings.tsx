@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { HubSnapshot } from '../../../main/core/types'
 import { Hint, NumberField, ThemePicker, Toggle } from '../components'
+import type { FloatChatSettings } from '../../../main/core/settings'
 
 export function Settings({ snap }: { snap: HubSnapshot }) {
   const s = snap.settings
@@ -25,7 +26,7 @@ export function Settings({ snap }: { snap: HubSnapshot }) {
           </div>
           <p className="small muted">
             {s.setupMode === 'two'
-              ? 'Crossember стоит на ПК с OBS. Чат и события на игровом ПК — в браузере (блок «Второй ПК»).'
+              ? 'Crossember стоит на стрим-ПК рядом с OBS — там же открыт общий чат всех площадок.'
               : 'Игра, OBS и Crossember на одном компьютере.'}
           </p>
           <h3 style={{ marginTop: 18 }}>Тема по умолчанию <Hint id="theme" /></h3>
@@ -36,9 +37,12 @@ export function Settings({ snap }: { snap: HubSnapshot }) {
           </button>
         </div>
 
-        {s.setupMode === 'two' && (
+        <FloatCard snap={snap} />
+
+        {(
           <div className="card">
-            <h3>Второй ПК: чат в браузере <Hint id="lan" /></h3>
+            <h3>Чат на другом устройстве <Hint id="lan" /></h3>
+            <p className="small muted" style={{ marginTop: -6 }}>Телефон, планшет или второй ПК в той же домашней сети: чат и события в обычном браузере.</p>
             <div className="field">
               <label>Адрес этого ПК в домашней сети</label>
               <select className="input" value={s.lan.host} onChange={(e) => void window.hub.setSettings({ lan: { host: e.target.value } })}>
@@ -48,7 +52,7 @@ export function Settings({ snap }: { snap: HubSnapshot }) {
               {lan && lan.addresses.length === 0 && <span className="small muted">Не найдено подключений к домашней сети.</span>}
             </div>
             <NumberField label="Порт" value={s.lan.port} min={1024} max={65535} onChange={(v) => void window.hub.setSettings({ lan: { port: v } })} />
-            <Toggle on={s.lan.enabled} onChange={(v) => void window.hub.setSettings({ lan: { enabled: v } })} label="Открыть чат для второго ПК" />
+            <Toggle on={s.lan.enabled} onChange={(v) => void window.hub.setSettings({ lan: { enabled: v } })} label="Открыть чат для другого устройства" />
             {lan?.error && <div className="note warnbox" style={{ marginTop: 10 }}>{lan.error}</div>}
             {lan?.running && lan.url && (
               <div style={{ marginTop: 12 }}>
@@ -56,8 +60,8 @@ export function Settings({ snap }: { snap: HubSnapshot }) {
                   <code>{lan.url.replace(/k=.+$/, 'k=••••••')}</code>
                   <button className="btn sm" onClick={() => { void window.hub.copy(lan.url!); setCopied(true); setTimeout(() => setCopied(false), 1500) }}>{copied ? 'Скопировано ✓' : 'Скопировать'}</button>
                 </div>
-                <p className="small muted">Откройте эту ссылку в браузере на игровом ПК (можно отправить себе в мессенджер). Если не открывается — проверьте, что Windows разрешила доступ для частной сети.</p>
-                <KeyRotate label="Перевыпустить ключ второго ПК" confirm={confirm === 'remote'} onAsk={() => setConfirm('remote')} onCancel={() => setConfirm(null)} onYes={() => { void window.hub.rotateKey('remote'); setConfirm(null) }} />
+                <p className="small muted">Откройте ссылку в браузере на телефоне, планшете или втором ПК (можно отправить себе в «Избранное» мессенджера). Если не открывается — проверьте, что Windows разрешила доступ для частной сети.</p>
+                <KeyRotate label="Перевыпустить ключ ссылки" confirm={confirm === 'remote'} onAsk={() => setConfirm('remote')} onCancel={() => setConfirm(null)} onYes={() => { void window.hub.rotateKey('remote'); setConfirm(null) }} />
               </div>
             )}
           </div>
@@ -98,6 +102,47 @@ function KeyRotate({ label, confirm, onAsk, onCancel, onYes }: { label: string; 
         <button className="btn primary sm" onClick={onYes}>Да, перевыпустить</button>
         <button className="btn sm" onClick={onCancel}>Отмена</button>
       </div>
+    </div>
+  )
+}
+
+function FloatCard({ snap }: { snap: HubSnapshot }) {
+  const f = snap.settings.float
+  const set = (p: Partial<FloatChatSettings>): void => void window.hub.setSettings({ float: p })
+  const b = f.bounds ?? { x: 0, y: 0, width: 380, height: 520 }
+  return (
+    <div className="card">
+      <h3>Чат поверх игры <Hint id="float" /></h3>
+      <p className="small muted" style={{ marginTop: -6 }}>Прозрачное окно с чатом поверх всех окон. Клики проходят сквозь него в игру.</p>
+      <Toggle on={f.enabled} onChange={(v) => set({ enabled: v })} label="Показывать чат поверх игры" />
+      {f.enabled && (
+        <>
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', margin: '6px 0 12px' }}>
+            <button className={snap.float.editing ? 'btn sm primary' : 'btn sm'} onClick={() => void window.hub.floatEdit()}>
+              {snap.float.editing ? 'Готово — закрепить' : 'Настроить положение'}
+            </button>
+            <button className="btn sm" onClick={() => void window.hub.floatReset()}>Вернуть в угол экрана</button>
+          </div>
+          <p className="small muted">Горячая клавиша: <b className="mono">{snap.float.hotkey}</b> — включить/выключить режим перетаскивания прямо в игре.</p>
+          <div className="field">
+            <label>Тема</label>
+            <ThemePicker value={f.theme} onChange={(t) => set({ theme: t })} />
+          </div>
+          <div className="grid g3" style={{ gap: 10 }}>
+            <NumberField label="Шрифт" value={f.fontSize} min={10} max={72} suffix="px" onChange={(v) => set({ fontSize: v })} />
+            <NumberField label="Сообщений" value={f.maxMessages} min={1} max={100} onChange={(v) => set({ maxMessages: v })} />
+            <NumberField label="Скрывать через" value={f.hideAfterSec} min={0} max={3600} suffix="сек" onChange={(v) => set({ hideAfterSec: v })} />
+            <NumberField label="Подложка" value={f.bgOpacity} min={0} max={100} suffix="%" onChange={(v) => set({ bgOpacity: v })} />
+            <NumberField label="Ширина" value={b.width} min={200} max={4000} suffix="px" onChange={(v) => set({ bounds: { ...b, width: v } })} />
+            <NumberField label="Высота" value={b.height} min={120} max={4000} suffix="px" onChange={(v) => set({ bounds: { ...b, height: v } })} />
+          </div>
+          <div style={{ display: 'flex', gap: 18, flexWrap: 'wrap' }}>
+            <Toggle on={f.showBadges} onChange={(v) => set({ showBadges: v })} label="Бейджи" />
+            <Toggle on={f.showPlatform} onChange={(v) => set({ showPlatform: v })} label="Значок площадки" />
+            <Toggle on={f.showStatus} onChange={(v) => set({ showStatus: v })} label="Строки о сбоях" />
+          </div>
+        </>
+      )}
     </div>
   )
 }

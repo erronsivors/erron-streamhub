@@ -74,6 +74,7 @@ function ChatSettings({ c, set }: { c: ChatOverlaySettings; set: (p: Record<stri
       <div style={{ display: 'flex', gap: 18, flexWrap: 'wrap' }}>
         <Toggle on={c.showBadges} onChange={(v) => set({ showBadges: v })} label="Бейджи" />
         <Toggle on={c.showPlatform} onChange={(v) => set({ showPlatform: v })} label="Значок площадки" />
+        <Toggle on={c.showStatus} onChange={(v) => set({ showStatus: v })} label={<>Строки о сбоях площадок <Hint id="showStatus" /></>} />
       </div>
     </>
   )

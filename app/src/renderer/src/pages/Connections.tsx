@@ -5,7 +5,7 @@ import { PlatIcon, fmtTime, useNow } from '../ui'
 
 const STATE_LABEL: Record<ConnStatus['state'], string> = { off: 'Не подключено', connecting: 'Подключение…', ok: 'Подключено', error: 'Ошибка' }
 const STAGE: Partial<Record<Platform, string>> = {
-  youtube: 'этап 2', vk: 'этап 2', kick: 'этап 2',
+  youtube: 'этап 2', vk: 'этап 2', kick: 'этап 2', goodgame: 'этап 2',
   donationalerts: 'этап 3', donatepay: 'этап 3', donatex: 'этап 3', boosty: 'этап 3'
 }
 const HINT: Partial<Record<Platform, string>> = { obs: 'obs', twitch: 'twitch' }

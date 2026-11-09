@@ -15,8 +15,10 @@ const OVERLAYS = [
   { id: 'alert', key: 'alert', name: 'Алерты', size: '1920 × 1080' },
   { id: 'chat', key: 'chat', name: 'Чат вертикальный', size: '500 × 900' },
   { id: 'chat-h', key: 'chatH', name: 'Чат горизонтальный', size: '1920 × 80' },
-  { id: 'pinned', key: 'pinned', name: 'Закреплённое сообщение', size: '1200 × 300' }
-] as const
+  { id: 'pinned', key: 'pinned', name: 'Закреплённое сообщение', size: '1200 × 300' },
+  // Окно «чат поверх игры» — открывается самим Crossember, в списке для OBS не показывается.
+  { id: 'float', key: 'float', name: 'Чат поверх игры', size: '', hidden: true }
+] as { id: string; key: string; name: string; size: string; hidden?: boolean }[]
 
 /** Общие файлы оверлеев и пульта — только этот список. */
 const ASSETS: Record<string, string> = {
@@ -122,7 +124,8 @@ export class OverlayServer {
 
   /** Сообщить оверлеям о новых настройках (тема, размер шрифта…). */
   pushConfig(): void {
-    this.broadcast({ kind: 'config', overlays: this.settings.get().overlays })
+    const s = this.settings.get()
+    this.broadcast({ kind: 'config', overlays: { ...s.overlays, float: s.float } })
   }
 
   info(): ServerInfo {
@@ -130,7 +133,7 @@ export class OverlayServer {
     return {
       port: this.port,
       baseUrl,
-      overlays: OVERLAYS.map((o) => ({ id: o.id, name: o.name, size: o.size, url: `${baseUrl}/o/${o.id}?k=${this.overlayKey}` })),
+      overlays: OVERLAYS.filter((o) => !o.hidden).map((o) => ({ id: o.id, name: o.name, size: o.size, url: `${baseUrl}/o/${o.id}?k=${this.overlayKey}` })),
       lan: { running: !!this.lan, url: this.lanUrl, error: this.lanError, addresses: lanAddresses() }
     }
   }
@@ -145,7 +148,7 @@ export class OverlayServer {
     return JSON.stringify({
       kind: 'hello',
       role: kind === 'lan' ? 'remote' : 'overlay',
-      overlays: s.overlays,
+      overlays: { ...s.overlays, float: s.float },
       chat: this.hub.recentChat().slice(0, 50),
       events: kind === 'lan' ? this.hub.recent().slice(0, 30) : [],
       pinned: this.hub.pinned
@@ -243,10 +246,15 @@ export class OverlayServer {
     await this.applyLan()
   }
 
-  /** Включить/выключить/перезапустить LAN-сервер по текущим настройкам (только в режиме «2 ПК»). */
+  /** Ссылка на оверлей по id (для окна «чат поверх игры»). */
+  overlayUrl(id: string): string {
+    return `http://127.0.0.1:${this.port}/o/${id}?k=${this.overlayKey}`
+  }
+
+  /** Включить/выключить/перезапустить сервер «Чат на другом устройстве» (любой режим). */
   async applyLan(): Promise<void> {
     const s = this.settings.get()
-    const want = s.setupMode === 'two' && s.lan.enabled && !!s.lan.host
+    const want = s.lan.enabled && !!s.lan.host
     if (this.lan) {
       for (const [sock, kind] of this.sockets) if (kind === 'lan') sock.close()
       await this.lan.close().catch(() => undefined)

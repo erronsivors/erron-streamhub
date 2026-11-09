@@ -8,6 +8,7 @@ import { OverlayServer } from './core/server'
 import { ObsConnector } from './core/obs'
 import { TwitchConnector } from './core/twitch'
 import { ImageCache } from './core/imgcache'
+import { FloatChat, FLOAT_HOTKEY } from './core/floatchat'
 import type { HubEvent, HubSnapshot, Platform } from './core/types'
 
 // Один экземпляр приложения: второй запуск просто показывает окно.
@@ -23,10 +24,11 @@ let hub: Hub
 let server: OverlayServer
 let obs: ObsConnector
 let twitch: TwitchConnector
+let floatChat: FloatChat
 
 // Площадки следующих этапов — видны в «Подключениях» как «Не настроено».
 const PLANNED: [Platform, string][] = [
-  ['youtube', 'YouTube'], ['vk', 'VK Видео Live'], ['kick', 'Kick'],
+  ['youtube', 'YouTube'], ['vk', 'VK Видео Live'], ['kick', 'Kick'], ['goodgame', 'GoodGame'],
   ['donationalerts', 'DonationAlerts'], ['donatepay', 'DonatePay'], ['donatex', 'DonateX'], ['boosty', 'Boosty']
 ]
 
@@ -40,7 +42,8 @@ function snapshot(): HubSnapshot {
     server: server.info(),
     obsConfig: obs.config(),
     settings: settings.get(),
-    twitch: twitch.state()
+    twitch: twitch.state(),
+    float: { open: floatChat?.isOpen ?? false, editing: floatChat?.isEditing ?? false, hotkey: FLOAT_HOTKEY.replace('CommandOrControl', 'Ctrl') }
   }
 }
 
@@ -143,12 +146,15 @@ app.whenReady().then(async () => {
     pin: (id) => hub.togglePin(id)
   })
   obs.onChange = pushUpdate
+  floatChat = new FloatChat(settings, hub, () => server.overlayUrl('float'))
+  floatChat.onChange = pushUpdate
   twitch.onChange = pushUpdate
 
   let prev: AppSettings = settings.get()
   settings.onChange = (s) => {
     server.pushConfig()
     if (s.setupMode !== prev.setupMode || JSON.stringify(s.lan) !== JSON.stringify(prev.lan)) void server.applyLan().then(pushUpdate)
+    floatChat.apply()
     if (s.twitch.customClientId !== prev.twitch.customClientId || s.twitch.thirdPartyEmotes !== prev.twitch.thirdPartyEmotes) void twitch.restart()
     prev = s
     pushUpdate()
@@ -179,6 +185,12 @@ app.whenReady().then(async () => {
     const s = samples[String(kind)]
     if (s) hub.push(s)
   })
+  handle('hub:floatEdit', () => floatChat.toggleEdit())
+  handle('hub:floatReset', () => floatChat.reset())
+  handle('hub:reconnect', (p) => {
+    if (p === 'twitch') return twitch.restart()
+    if (p === 'obs') return obs.reconnect()
+  })
   handle('hub:twitchLogin', (r) => twitch.login(role(r)))
   handle('hub:twitchCancel', () => twitch.cancelLogin())
   handle('hub:twitchLogout', (r) => twitch.logout(role(r)))
@@ -205,11 +217,13 @@ app.whenReady().then(async () => {
   }
   await obs.start()
   void twitch.start()
+  floatChat.apply()
   pushUpdate()
 })
 
 app.on('window-all-closed', () => app.quit())
 app.on('before-quit', () => {
+  floatChat?.close()
   twitch?.stop()
   void obs?.stop()
   void server?.stop()

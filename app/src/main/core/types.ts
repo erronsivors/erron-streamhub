@@ -1,7 +1,7 @@
 // Общие типы ядра. Те же типы использует интерфейс (через preload).
 import type { AppSettings } from './settings'
 
-export type Platform = 'twitch' | 'youtube' | 'vk' | 'kick' | 'donationalerts' | 'donatepay' | 'donatex' | 'boosty' | 'obs' | 'hub'
+export type Platform = 'twitch' | 'youtube' | 'vk' | 'kick' | 'goodgame' | 'donationalerts' | 'donatepay' | 'donatex' | 'boosty' | 'obs' | 'hub'
 
 export type HubEventType = 'message' | 'donation' | 'follow' | 'sub' | 'gift' | 'raid' | 'bits' | 'reward' | 'system'
 
@@ -99,4 +99,5 @@ export interface HubSnapshot {
   obsConfig: { url: string; hasPassword: boolean }
   settings: AppSettings
   twitch: TwitchState
+  float: { open: boolean; editing: boolean; hotkey: string }
 }

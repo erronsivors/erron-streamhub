@@ -5,6 +5,8 @@ import type { ConnLogEntry, ConnState, ConnStatus, HubEvent, MsgPart, Platform }
 const LOG_LIMIT = 50
 const EVENTS_LIMIT = 200
 const CHAT_LIMIT = 300
+/** Площадки с чатом: у них сбой показывается служебной строкой в ленте. */
+const CHAT_PLATFORMS = new Set<Platform>(['twitch', 'youtube', 'vk', 'kick', 'goodgame'])
 
 /** Текст из внешних источников: обрезаем длину и убираем управляющие символы. */
 export function clean(s: unknown, max = 500): string {
@@ -28,6 +30,7 @@ export class Hub extends EventEmitter {
   private events: HubEvent[] = []
   private chat: HubEvent[] = []
   pinned: HubEvent | null = null
+  private lost = new Set<Platform>()
 
   register(id: Platform, name: string): void {
     if (!this.conns.has(id)) this.conns.set(id, { id, name, state: 'off', detail: 'Не настроено', since: Date.now(), log: [] })
@@ -38,11 +41,22 @@ export class Hub extends EventEmitter {
     if (!c) return
     if (c.state !== state || c.detail !== detail) {
       const level: ConnLogEntry['level'] = state === 'error' ? 'error' : state === 'connecting' ? 'warn' : 'info'
-      if (c.state !== state) c.since = Date.now()
+      const prev = c.state
+      if (prev !== state) c.since = Date.now()
       c.state = state
       c.detail = detail
       this.log(id, level, detail)
       this.emit('status', c)
+      // Служебная строка в ленте чата: площадка отвалилась / вернулась (только для площадок с чатом).
+      if (CHAT_PLATFORMS.has(id)) {
+        if (prev === 'ok' && state !== 'ok' && state !== 'off') {
+          this.lost.add(id)
+          this.push({ platform: id, type: 'system', user: c.name, text: `${c.name}: связь потеряна — ${detail}` })
+        } else if (state === 'ok' && this.lost.has(id)) {
+          this.lost.delete(id)
+          this.push({ platform: id, type: 'system', user: c.name, text: `${c.name}: снова подключено` })
+        }
+      }
     }
   }
 
@@ -75,9 +89,10 @@ export class Hub extends EventEmitter {
       badges: e.badges?.slice(0, 8).map((b) => ({ title: clean(b.title, 64), url: b.url })),
       currency: e.currency === undefined ? undefined : clean(e.currency, 8)
     }
-    const list = ev.type === 'message' ? this.chat : this.events
+    const inChat = ev.type === 'message' || ev.type === 'system'
+    const list = inChat ? this.chat : this.events
     list.unshift(ev)
-    const limit = ev.type === 'message' ? CHAT_LIMIT : EVENTS_LIMIT
+    const limit = inChat ? CHAT_LIMIT : EVENTS_LIMIT
     if (list.length > limit) list.length = limit
     this.emit('event', ev)
     return ev

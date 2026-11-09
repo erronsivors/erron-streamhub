@@ -16,6 +16,16 @@ export interface ChatOverlaySettings {
   hideAfterSec: number
   showBadges: boolean
   showPlatform: boolean
+  /** Показывать служебные строки «площадка отключилась / подключилась». */
+  showStatus: boolean
+}
+
+/** Чат поверх игры: прозрачное окно поверх всех окон, клики проходят насквозь. */
+export interface FloatChatSettings extends ChatOverlaySettings {
+  enabled: boolean
+  /** Непрозрачность подложки сообщений, % (0 — только текст). */
+  bgOpacity: number
+  bounds: { x: number; y: number; width: number; height: number } | null
 }
 
 export interface AppSettings {
@@ -39,6 +49,7 @@ export interface AppSettings {
     chatH: ChatOverlaySettings
     pinned: { theme: Theme; fontSize: number }
   }
+  float: FloatChatSettings
 }
 
 const chatDefaults = (horizontal: boolean): ChatOverlaySettings => ({
@@ -47,7 +58,8 @@ const chatDefaults = (horizontal: boolean): ChatOverlaySettings => ({
   maxMessages: horizontal ? 12 : 30,
   hideAfterSec: horizontal ? 30 : 0,
   showBadges: true,
-  showPlatform: true
+  showPlatform: true,
+  showStatus: false
 })
 
 export const DEFAULTS: AppSettings = {
@@ -60,7 +72,8 @@ export const DEFAULTS: AppSettings = {
     chat: chatDefaults(false),
     chatH: chatDefaults(true),
     pinned: { theme: 'general', fontSize: 34 }
-  }
+  },
+  float: { ...chatDefaults(false), fontSize: 18, maxMessages: 12, hideAfterSec: 45, showStatus: true, enabled: false, bgOpacity: 55, bounds: null }
 }
 
 const theme = (v: unknown, d: Theme): Theme => (v === 'general' || v === 'campfire' ? v : d)
@@ -77,8 +90,19 @@ function chat(v: unknown, d: ChatOverlaySettings): ChatOverlaySettings {
     maxMessages: int(o.maxMessages, d.maxMessages, 1, 100),
     hideAfterSec: int(o.hideAfterSec, d.hideAfterSec, 0, 3600),
     showBadges: bool(o.showBadges, d.showBadges),
-    showPlatform: bool(o.showPlatform, d.showPlatform)
+    showPlatform: bool(o.showPlatform, d.showPlatform),
+    showStatus: bool(o.showStatus, d.showStatus ?? false)
   }
+}
+
+function float(v: unknown, d: FloatChatSettings): FloatChatSettings {
+  const o = obj(v)
+  const b = o.bounds === null ? null : obj(o.bounds)
+  const bounds =
+    b && Object.keys(b).length
+      ? { x: int(b.x, 100, -10000, 10000), y: int(b.y, 100, -10000, 10000), width: int(b.width, 380, 200, 4000), height: int(b.height, 520, 120, 4000) }
+      : o.bounds === null ? null : d.bounds
+  return { ...chat(o, d), enabled: bool(o.enabled, d.enabled), bgOpacity: int(o.bgOpacity, d.bgOpacity, 0, 100), bounds }
 }
 
 /** Привести произвольный объект к корректным настройкам (неизвестные поля отбрасываются). */
@@ -110,7 +134,8 @@ export function sanitize(input: unknown, base: AppSettings = DEFAULTS): AppSetti
         theme: theme(obj(ov.pinned).theme, base.overlays.pinned.theme),
         fontSize: int(obj(ov.pinned).fontSize, base.overlays.pinned.fontSize, 12, 96)
       }
-    }
+    },
+    float: float(i.float, base.float ?? DEFAULTS.float)
   }
 }
 

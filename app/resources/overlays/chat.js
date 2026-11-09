@@ -1,13 +1,16 @@
 'use strict';
-// Чат-оверлей: вертикальный (новые снизу) или горизонтальный (новые слева) — по data-mode на <body>.
+// Чат-оверлей. Режим по data-mode на <body>:
+//   v — вертикальный (новые снизу), h — горизонтальный (новые слева), f — окно «чат поверх игры».
 const list = document.getElementById('list');
-const horizontal = document.body.dataset.mode === 'h';
+const mode = document.body.dataset.mode;
+const horizontal = mode === 'h';
 let opts = null;
 
 function apply(overlays) {
-  opts = horizontal ? overlays.chatH : overlays.chat;
+  opts = mode === 'h' ? overlays.chatH : mode === 'f' ? overlays.float : overlays.chat;
   CB.theme(opts.theme);
   document.body.style.setProperty('--fs', opts.fontSize + 'px');
+  if (mode === 'f') document.body.style.setProperty('--bgp', opts.bgOpacity + '%');
   trim();
 }
 
@@ -18,8 +21,17 @@ function trim() {
   }
 }
 
+function visible(m) {
+  if (m.type === 'message') return true;
+  return m.type === 'system' && opts.showStatus;
+}
+
 function add(m, animate) {
-  const row = CB.line(m, opts);
+  let row;
+  if (m.type === 'system') {
+    row = CB.el('div', 'msg system', m.text);
+    row.dataset.platform = m.platform;
+  } else row = CB.line(m, opts);
   row.classList.add('card');
   if (!animate) row.style.animation = 'none';
   if (horizontal) list.prepend(row);
@@ -33,18 +45,21 @@ function add(m, animate) {
 CB.on('hello', (d) => {
   apply(d.overlays);
   list.replaceChildren();
-  // Последние сообщения при перезапуске источника — но только если они не должны были уже исчезнуть.
+  // Последние сообщения при перезапуске источника — только те, что ещё не должны были исчезнуть.
   const now = Date.now();
-  const recent = d.chat.filter((m) => opts.hideAfterSec === 0 || now - m.ts < opts.hideAfterSec * 1000).slice(0, opts.maxMessages).reverse();
+  const recent = d.chat
+    .filter((m) => visible(m) && (opts.hideAfterSec === 0 || now - m.ts < opts.hideAfterSec * 1000))
+    .slice(0, opts.maxMessages)
+    .reverse();
   for (const m of recent) add(m, false);
 });
 CB.on('config', (d) => apply(d.overlays));
-CB.on('event', (d) => { if (opts && d.event && d.event.type === 'message') add(d.event, true); });
+CB.on('event', (d) => { if (opts && d.event && visible(d.event)) add(d.event, true); });
 CB.on('delete', (d) => {
   for (const row of [...list.children]) {
     const byId = d.id && row.dataset.id === d.id;
     const byUser = d.userId && row.dataset.user === d.platform + ':' + d.userId;
-    const byPlatform = !d.id && !d.userId && d.platform && row.dataset.platform === d.platform;
+    const byPlatform = !d.id && !d.userId && d.platform && row.dataset.platform === d.platform && !row.classList.contains('system');
     if (byId || byUser || byPlatform) row.remove();
   }
 });

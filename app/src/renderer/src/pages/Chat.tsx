@@ -73,13 +73,20 @@ export function Chat({ snap }: { snap: HubSnapshot }) {
 
       <div className="grid" style={{ gridTemplateColumns: 'minmax(0,1fr) 300px' }}>
         <div className="card chatbox">
+          <PlatformStrip snap={snap} />
           <div className="chatlist" ref={listRef}>
             {messages.length === 0 && (
               <div className="empty">
                 {twitch.broadcaster ? 'Сообщений пока нет. Напишите что-нибудь в чат канала.' : 'Подключите Twitch в разделе «Подключения» — сообщения появятся здесь.'}
               </div>
             )}
-            {messages.map((m) => (
+            {messages.map((m) => m.type === 'system' ? (
+              <div key={m.id} className="cmsg csys">
+                <span className="ctime">{fmtTime(m.ts).slice(0, 5)}</span>
+                <span className="cplat" style={{ background: PLATFORM[m.platform].color }} />
+                {m.text}
+              </div>
+            ) : (
               <div key={m.id} className={`cmsg ${snap.pinned?.id === m.id ? 'pinned' : ''}`}>
                 <span className="ctime">{fmtTime(m.ts).slice(0, 5)}</span>
                 <span className="cplat" style={{ background: PLATFORM[m.platform].color }} title={m.platform} />
@@ -132,5 +139,27 @@ export function Chat({ snap }: { snap: HubSnapshot }) {
         </div>
       </div>
     </>
+  )
+}
+
+const CHAT_PLATFORMS = ['twitch', 'youtube', 'vk', 'kick', 'goodgame']
+
+/** Полоска площадок над чатом: зелёная — работает, красная мигающая — сбой, с кнопкой «Переподключить». */
+function PlatformStrip({ snap }: { snap: HubSnapshot }) {
+  const conns = snap.connections.filter((c) => CHAT_PLATFORMS.includes(c.id) && c.state !== 'off')
+  if (!conns.length) return null
+  return (
+    <div className="pstrip">
+      {conns.map((c) => (
+        <div key={c.id} className={`pchip ${c.state}`} title={c.detail}>
+          <span className="cplat" style={{ background: PLATFORM[c.id].color }} />
+          <b>{c.name}</b>
+          {c.state === 'ok' && c.id === 'twitch' && snap.twitch.viewers !== null && <span className="muted">👁 {snap.twitch.viewers}</span>}
+          {c.state === 'connecting' && <span className="muted">подключение…</span>}
+          {c.state === 'error' && <span className="perr">{c.detail}</span>}
+          {c.state !== 'ok' && <button className="btn sm" onClick={() => void window.hub.reconnect(c.id)}>Переподключить</button>}
+        </div>
+      ))}
+    </div>
   )
 }

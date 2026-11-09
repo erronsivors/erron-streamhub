@@ -201,3 +201,14 @@ select.input { cursor: pointer; }
 
 /* Место под смайл резервируется сразу — строка не прыгает, пока картинка грузится */
 .emote, .ctext .emote { min-width: 26px; }
+
+/* Полоска площадок над мультичатом */
+.pstrip { display: flex; flex-wrap: wrap; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+.pchip { display: flex; align-items: center; gap: 8px; padding: 5px 10px; border-radius: 10px; background: var(--coal-2); border: 1px solid var(--line-2); font-size: 13px; max-width: 100%; }
+.pchip.ok { border-color: #5fd38d55; }
+.pchip.connecting { border-color: #ffb24a88; }
+.pchip.error { border-color: var(--fire); background: #ff2d3c1f; animation: perr 1.4s infinite; }
+.pchip .perr { color: #ff9aa2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 320px; }
+.pchip .btn.sm { padding: 3px 10px; font-size: 12px; }
+@keyframes perr { 50% { box-shadow: 0 0 0 3px #ff2d3c44; } }
+.csys { color: var(--warn); font-size: 13px; font-weight: 600; }

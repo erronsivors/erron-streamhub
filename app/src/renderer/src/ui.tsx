@@ -34,6 +34,7 @@ export const PLATFORM: Record<Platform, { short: string; color: string }> = {
   youtube: { short: 'YT', color: '#ff0033' },
   vk: { short: 'VK', color: '#0077ff' },
   kick: { short: 'K', color: '#29b32b' },
+  goodgame: { short: 'GG', color: '#233056' },
   donationalerts: { short: 'DA', color: '#f57d07' },
   donatepay: { short: 'DP', color: '#2a9d8f' },
   donatex: { short: 'DX', color: '#7b5cff' },
