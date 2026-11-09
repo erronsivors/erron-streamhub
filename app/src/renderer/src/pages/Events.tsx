@@ -1,5 +1,6 @@
 import type { HubSnapshot } from '../../../main/core/types'
 import { EventRow, useNow } from '../ui'
+import { Hint } from '../components'
 
 export function Events({ snap }: { snap: HubSnapshot }) {
   const now = useNow(15000)
@@ -8,7 +9,7 @@ export function Events({ snap }: { snap: HubSnapshot }) {
     <>
       <div className="head">
         <div>
-          <h1>События</h1>
+          <h1>События <Hint id="testEvents" /></h1>
           <p>Донаты, подписки, рейды и фолловы со всех площадок в одной ленте. Тестовые не идут в статистику.</p>
         </div>
         <div className="actions">

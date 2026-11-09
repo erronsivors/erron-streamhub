@@ -1,0 +1,14 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><title>Crossember · Чат</title>
+<link rel="stylesheet" href="/a/overlay.css">
+<style>
+  #list { position: absolute; left: 0; right: 0; bottom: 0; padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+  .msg { padding: .45em .7em; overflow-wrap: anywhere; animation: in .3s ease; transition: opacity .6s; }
+  .msg.gone { opacity: 0; }
+  .sep { color: var(--muted); }
+  body.t-campfire .msg { box-shadow: 0 0 0 1px #2a1d18; }
+  @keyframes in { from { opacity: 0; transform: translateY(10px); } }
+</style></head>
+<body class="t-general" data-mode="v"><div id="list"></div>
+<script src="/a/overlay.js"></script><script src="/a/chat.js"></script>
+</body></html>

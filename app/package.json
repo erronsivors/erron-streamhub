@@ -1,9 +1,9 @@
 {
-  "name": "erron-streamhub",
-  "productName": "ERRON StreamHub",
+  "name": "crossember",
+  "productName": "Crossember",
   "version": "0.1.0",
   "private": true,
-  "description": "Личный мульти-хаб стримера ERRON",
+  "description": "Crossember — мульти-хаб стримера. Made by erron for friends",
   "main": "out/main/index.js",
   "scripts": {
     "dev": "electron-vite dev",

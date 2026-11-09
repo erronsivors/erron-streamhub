@@ -1,4 +1,4 @@
-/* ERRON StreamHub — оформление на токенах «Тёплый привал» */
+/* Crossember — оформление на токенах «Тёплый привал» */
 :root {
   --night: #0f0b0a;
   --coal: #1a1311;
@@ -138,3 +138,66 @@ button, input, select { font: inherit; color: inherit; }
 .placeholder .big { font-size: 26px; margin-bottom: 10px; }
 .note { background: #2f6bff12; border: 1px solid #2f6bff33; border-radius: 12px; padding: 12px 14px; font-size: 13px; color: var(--ink-2); }
 .warnbox { background: #ff2d3c12; border: 1px solid #ff2d3c44; }
+
+/* Подсказка «!» */
+.hint { position: relative; display: inline-grid; place-items: center; width: 18px; height: 18px; border-radius: 50%;
+        border: 1px solid var(--line-2); color: var(--light); font: 800 11px var(--f-text); cursor: help; vertical-align: middle;
+        margin-left: 4px; flex: none; outline: none; }
+.hint:hover, .hint:focus { border-color: var(--light); }
+.hint-pop { display: none; position: absolute; z-index: 50; left: 50%; top: calc(100% + 8px); transform: translateX(-50%);
+            width: 340px; padding: 12px 14px; border-radius: 12px; background: #120d0c; border: 1px solid var(--line-2);
+            box-shadow: 0 14px 40px #000a; color: var(--ink-2); font: 500 13px/1.5 var(--f-text); text-align: left;
+            white-space: pre-line; letter-spacing: 0; text-transform: none; }
+.hint-pop b { display: block; color: #fff; font: 700 13px var(--f-display); margin-bottom: 6px; }
+.hint:hover .hint-pop, .hint:focus .hint-pop { display: block; }
+.head .hint-pop { left: 0; transform: none; }
+
+/* Переключатели и сегменты */
+.toggle { display: inline-flex; align-items: center; gap: 10px; cursor: pointer; margin: 8px 0; font-weight: 600; }
+.toggle input { display: none; }
+.toggle .sw { width: 38px; height: 22px; border-radius: 22px; background: var(--coal-3); border: 1px solid var(--line-2); position: relative; transition: background .2s; flex: none; }
+.toggle .sw::after { content: ''; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: var(--muted); transition: transform .2s, background .2s; }
+.toggle input:checked + .sw { background: var(--mix); border-color: var(--mix); }
+.toggle input:checked + .sw::after { transform: translateX(16px); background: #fff; }
+.seg { display: inline-flex; background: var(--night); border: 1px solid var(--line-2); border-radius: 12px; padding: 3px; gap: 3px; }
+.seg button { border: 0; background: none; padding: 7px 14px; border-radius: 9px; cursor: pointer; font-weight: 700; color: var(--muted); }
+.seg button.on { background: var(--coal-3); color: #fff; box-shadow: inset 0 0 0 1px var(--line-2); }
+.numrow { display: flex; align-items: center; gap: 8px; }
+.numrow .input { width: 100%; }
+select.input { cursor: pointer; }
+
+/* Мастер первого запуска */
+.modal-back { position: fixed; inset: 0; background: #000b; display: grid; place-items: center; z-index: 100; }
+.modal { width: min(760px, 92vw); max-height: 92vh; overflow-y: auto; background: var(--coal); border: 1px solid var(--line-2); border-radius: 22px; padding: 30px 32px; }
+.modal h2 { font: 800 26px var(--f-display); margin: 0 0 6px; }
+.modal h3 { font: 700 15px var(--f-display); margin: 24px 0 12px; }
+.choice { text-align: left; padding: 16px; border-radius: 14px; border: 1px solid var(--line-2); background: var(--coal-2); cursor: pointer; display: flex; flex-direction: column; gap: 6px; }
+.choice b { font: 700 16px var(--f-display); }
+.choice span { color: var(--muted); font-size: 13px; }
+.choice.on { border-color: var(--mix); box-shadow: 0 0 0 1px var(--mix), 0 0 24px #9a3fd633; }
+
+/* Код входа Twitch */
+.code { font: 700 30px var(--f-mono); letter-spacing: .2em; color: #fff; padding: 8px 0; user-select: text; }
+
+/* Мультичат */
+.chatbox { display: flex; flex-direction: column; padding: 0; height: calc(100vh - 230px); min-height: 360px; }
+.chatlist { flex: 1; overflow-y: auto; padding: 10px 12px; display: flex; flex-direction: column; gap: 2px; user-select: text; }
+.cmsg { position: relative; padding: 6px 8px; border-radius: 8px; line-height: 1.5; overflow-wrap: anywhere; }
+.cmsg:hover { background: var(--coal-2); }
+.cmsg.pinned { background: #9a3fd61a; box-shadow: inset 3px 0 0 var(--mix); }
+.ctime { color: var(--muted-2); font: 500 11px var(--f-mono); margin-right: 8px; }
+.cplat { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; vertical-align: 1px; }
+.cbadge { height: 16px; vertical-align: -3px; margin-right: 3px; }
+.cmsg b { margin-right: 6px; }
+.ctext .emote, .emote { height: 26px; vertical-align: middle; margin: -4px 1px; }
+.cact { display: none; position: absolute; right: 6px; top: 3px; background: var(--coal-3); border: 1px solid var(--line-2); border-radius: 8px; padding: 2px; }
+.cmsg:hover .cact { display: flex; }
+.cact button { border: 0; background: none; cursor: pointer; padding: 3px 6px; border-radius: 6px; font-size: 13px; }
+.cact button:hover { background: var(--coal); }
+.cact .danger { color: #ff7a84; font-weight: 700; }
+.chatinput { display: flex; gap: 8px; padding: 10px 12px; border-top: 1px solid var(--line); }
+.chatinput .input:first-child { flex: 1; }
+.brand small { letter-spacing: .08em; font-size: 9px; }
+
+/* Место под смайл резервируется сразу — строка не прыгает, пока картинка грузится */
+.emote, .ctext .emote { min-width: 26px; }

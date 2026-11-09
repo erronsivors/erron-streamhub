@@ -1,0 +1,31 @@
+/* Crossember — общие стили оверлеев. Тема задаётся классом на <body>: t-general | t-campfire */
+@font-face { font-family: 'Unbounded'; font-weight: 800; src: url('/f/unbounded-800-cyr.woff2') format('woff2'); unicode-range: U+0400-04FF; }
+@font-face { font-family: 'Unbounded'; font-weight: 800; src: url('/f/unbounded-800-lat.woff2') format('woff2'); }
+@font-face { font-family: 'Manrope'; font-weight: 600; src: url('/f/manrope-600-cyr.woff2') format('woff2'); unicode-range: U+0400-04FF; }
+@font-face { font-family: 'Manrope'; font-weight: 600; src: url('/f/manrope-600-lat.woff2') format('woff2'); }
+@font-face { font-family: 'Manrope'; font-weight: 800; src: url('/f/manrope-800-cyr.woff2') format('woff2'); unicode-range: U+0400-04FF; }
+@font-face { font-family: 'Manrope'; font-weight: 800; src: url('/f/manrope-800-lat.woff2') format('woff2'); }
+
+html, body { margin: 0; width: 100vw; height: 100vh; overflow: hidden; background: transparent; }
+body { --fs: 20px; font: 600 var(--fs)/1.35 'Manrope', sans-serif; color: var(--fg); }
+
+/* Тема «Общий»: нейтральное тёмное стекло */
+body.t-general {
+  --fg: #ffffff; --muted: #c8c8d0; --card: rgba(16, 16, 20, .72); --edge: rgba(255, 255, 255, .10);
+  --accent: #8e7dff; --accent-2: #5ec8ff; --glow: 0 0 0 transparent; --title: 'Manrope', sans-serif;
+  --grad: linear-gradient(90deg, var(--accent), var(--accent-2)); --kicker: #5ec8ff;
+}
+/* Тема «У костра»: тёплая ночь, огонь → смесь → путь */
+body.t-campfire {
+  --fg: #f3e9e2; --muted: #b9a69b; --card: rgba(26, 19, 17, .9); --edge: #9a3fd6;
+  --accent: #ff2d3c; --accent-2: #2f6bff; --glow: 0 0 34px #9a3fd677; --title: 'Unbounded', sans-serif;
+  --grad: linear-gradient(90deg, #ff2d3c, #9a3fd6 50%, #2f6bff); --kicker: #ffb27a;
+}
+
+.card { background: var(--card); box-shadow: 0 0 0 1.5px var(--edge), var(--glow); border-radius: 16px; }
+.emote { height: 1.6em; vertical-align: middle; margin: -0.25em 0.05em; }
+.badge { height: 1em; vertical-align: -0.12em; margin-right: 0.25em; }
+.plat { display: inline-block; width: .55em; height: .55em; border-radius: 50%; margin-right: .4em; vertical-align: .12em; }
+.p-twitch { background: #9146ff; } .p-youtube { background: #ff0033; } .p-vk { background: #0077ff; } .p-kick { background: #53fc18; }
+.name { font-weight: 800; margin-right: .35em; }
+.grad { background: var(--grad); -webkit-background-clip: text; background-clip: text; color: transparent; }

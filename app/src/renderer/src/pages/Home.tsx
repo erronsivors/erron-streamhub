@@ -31,9 +31,11 @@ export function Home({ snap, go }: { snap: HubSnapshot; go: (p: Page) => void })
 
       <div className="grid g3">
         <div className="card">
-          <h3>Зрители в эфире <span className="r tag">скоро</span></h3>
-          <div className="big muted">—</div>
-          <p className="small muted">Онлайн по площадкам появится после подключения Twitch, YouTube, VK и Kick.</p>
+          <h3>Зрители в эфире {snap.twitch.live && <span className="r tag">Twitch в эфире</span>}</h3>
+          <div className={`big ${snap.twitch.viewers === null ? 'muted' : ''}`}>{snap.twitch.viewers ?? '—'}</div>
+          <p className="small muted">
+            {snap.twitch.broadcaster ? `Twitch: ${snap.twitch.broadcaster.name}${snap.twitch.live ? '' : ' · не в эфире'}` : 'Подключите Twitch в «Подключениях»'}. YouTube, VK и Kick — на следующем этапе.
+          </p>
         </div>
 
         <div className="card">

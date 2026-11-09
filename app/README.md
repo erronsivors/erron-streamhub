@@ -1,4 +1,4 @@
-# ERRON StreamHub (app)
+# Crossember (app)
 
 Личный мульти-хаб стримера. ТЗ и этапы — `../ТЗ.md`.
 
