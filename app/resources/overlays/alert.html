@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>ERRON · Алерты</title>
+<style>
+  @font-face { font-family: 'Unbounded'; font-weight: 800; src: url('/f/unbounded-800-cyr.woff2') format('woff2'); unicode-range: U+0400-04FF; }
+  @font-face { font-family: 'Unbounded'; font-weight: 800; src: url('/f/unbounded-800-lat.woff2') format('woff2'); }
+  @font-face { font-family: 'Manrope'; font-weight: 600; src: url('/f/manrope-600-cyr.woff2') format('woff2'); unicode-range: U+0400-04FF; }
+  @font-face { font-family: 'Manrope'; font-weight: 600; src: url('/f/manrope-600-lat.woff2') format('woff2'); }
+  :root { --fire:#ff2d3c; --mix:#9a3fd6; --path:#2f6bff; --light:#ffb27a; --coal:#1a1311; --ink:#f3e9e2; --muted:#b9a69b;
+          --grad: linear-gradient(90deg, var(--fire), var(--mix) 50%, var(--path)); }
+  html, body { margin:0; width:100vw; height:100vh; overflow:hidden; background:transparent; }
+  #stage { position:absolute; left:50%; top:22%; transform:translateX(-50%); }
+  .alert { display:flex; align-items:center; gap:28px; padding:26px 44px 26px 26px; border-radius:26px;
+           background: rgba(26,19,17,.92); box-shadow: 0 0 0 2px var(--mix), 0 0 40px #9a3fd688, inset 0 0 22px #9a3fd633;
+           font-family:'Manrope',sans-serif; color:var(--ink); opacity:0; transform: translateY(-30px) scale(.96);
+           transition: opacity .45s ease, transform .45s cubic-bezier(.2,.9,.3,1.2); max-width:1400px; }
+  .alert.show { opacity:1; transform:none; }
+  .badge { width:96px; height:96px; border-radius:22px; background:var(--grad); display:grid; place-items:center;
+           font:800 44px 'Unbounded',sans-serif; color:#fff; flex:none; box-shadow:0 0 30px #ff2d3c66; }
+  .kicker { font:600 20px 'Manrope',sans-serif; letter-spacing:.18em; text-transform:uppercase; color:var(--light); }
+  .who { font:800 46px/1.15 'Unbounded',sans-serif; margin-top:6px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:900px; }
+  .who .amt { background:var(--grad); -webkit-background-clip:text; background-clip:text; color:transparent; margin-left:18px; }
+  .msg { font:600 26px/1.35 'Manrope',sans-serif; color:var(--muted); margin-top:10px; max-width:1050px; word-wrap:break-word; }
+  .test { font:600 16px 'Manrope',sans-serif; color:#9fb6ff; margin-left:14px; vertical-align:middle; letter-spacing:.1em; }
+</style>
+</head>
+<body>
+<div id="stage"></div>
+<script>
+// Безопасность: всё пользовательское (ник, сообщение) выводится только через textContent — никакого HTML.
+const key = new URLSearchParams(location.search).get('k') || '';
+const stage = document.getElementById('stage');
+const queue = [];
+let busy = false;
+
+const KIND = {
+  donation: { icon: '₽', title: 'Новый донат' },
+  sub:      { icon: '★', title: 'Подписка' },
+  gift:     { icon: '🎁', title: 'Подарочная подписка' },
+  follow:   { icon: '♥', title: 'Новый фолловер' },
+  raid:     { icon: '↗', title: 'Рейд' },
+  bits:     { icon: '◆', title: 'Биты' },
+  reward:   { icon: '✦', title: 'Награда за баллы' }
+};
+
+function el(tag, cls, text) {
+  const n = document.createElement(tag);
+  if (cls) n.className = cls;
+  if (text !== undefined) n.textContent = text;
+  return n;
+}
+
+function render(e) {
+  const k = KIND[e.type] || { icon: '!', title: e.type };
+  const box = el('div', 'alert');
+  box.append(el('div', 'badge', e.type === 'donation' && e.currency && e.currency !== 'RUB' ? '$' : k.icon));
+  const body = el('div');
+  const kicker = el('div', 'kicker', k.title);
+  if (e.test) kicker.append(el('span', 'test', 'ТЕСТ'));
+  const who = el('div', 'who', e.user);
+  if (e.type === 'donation' && e.amount) who.append(el('span', 'amt', `${e.amount.toLocaleString('ru-RU')} ${e.currency === 'RUB' ? '₽' : (e.currency || '')}`));
+  body.append(kicker, who);
+  if (e.text) body.append(el('div', 'msg', e.text));
+  box.append(body);
+  return box;
+}
+
+async function playNext() {
+  if (busy || !queue.length) return;
+  busy = true;
+  const e = queue.shift();
+  const box = render(e);
+  stage.replaceChildren(box);
+  requestAnimationFrame(() => requestAnimationFrame(() => box.classList.add('show')));
+  const ms = 5000 + Math.min((e.text || '').length * 40, 5000);
+  await new Promise(r => setTimeout(r, ms));
+  box.classList.remove('show');
+  await new Promise(r => setTimeout(r, 600));
+  stage.replaceChildren();
+  busy = false;
+  setTimeout(playNext, 400);
+}
+
+function connect() {
+  const ws = new WebSocket(`ws://${location.host}/ws?k=${encodeURIComponent(key)}`);
+  ws.onmessage = (m) => {
+    let d; try { d = JSON.parse(m.data); } catch { return; }
+    if (d.kind === 'event' && d.event && d.event.type !== 'message' && d.event.type !== 'system') {
+      queue.push(d.event);
+      playNext();
+    }
+  };
+  ws.onclose = (c) => { if (c.code !== 4003) setTimeout(connect, 2000); };
+}
+connect();
+</script>
+</body>
+</html>

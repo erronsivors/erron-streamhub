@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-10 -6 140 170" width="560" height="680">
+  <defs>
+    <linearGradient id="lMix" x1="0" y1="0" x2="1" y2="0"><stop offset=".28" stop-color="#ff2d3c"/><stop offset=".5" stop-color="#9a3fd6"/><stop offset=".72" stop-color="#2f6bff"/></linearGradient>
+    <linearGradient id="lMid" x1="0" y1="0" x2="1" y2="0"><stop offset=".25" stop-color="#ff6a5a"/><stop offset=".5" stop-color="#b06cf0"/><stop offset=".75" stop-color="#5c8cff"/></linearGradient>
+    <linearGradient id="lCore" x1="0" y1="0" x2="1" y2="0"><stop offset=".2" stop-color="#ffc6bc"/><stop offset=".5" stop-color="#ead9ff"/><stop offset=".8" stop-color="#c3d5ff"/></linearGradient>
+    <filter id="lSoft" x="-40%" y="-40%" width="180%" height="180%"><feGaussianBlur stdDeviation="4" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+    <!-- Буква E по контуру шрифта Unbounded ExtraBold: высота = высоте заглавных RRON (54), вогнутая ножка -->
+    <path id="eU" d="M35.4 82 H86.2 V95.3 H53.2 L54.4 103 H84 V114.9 H54.4 L53.2 122.5 H86.6 V136 H35.4 Q43.4 109 35.4 82 Z"/>
+    <g id="eOld"><rect x="42" y="82" width="12" height="54" rx="2"/><rect x="42" y="82" width="38" height="11" rx="2"/><rect x="42" y="103.5" width="30" height="11" rx="2"/><rect x="42" y="125" width="38" height="11" rx="2"/></g>
+    <g id="flameBody" filter="url(#lSoft)">
+      <path d="M60 6 C74 34 102 52 102 98 C102 130 83 154 60 154 C37 154 18 130 18 98 C18 72 32 58 39 40 C44 58 50 66 56 70 C51 48 53 26 60 6 Z" fill="url(#lMix)"/>
+      <path d="M60 40 C70 62 92 78 92 110 C92 134 78 152 60 152 C42 152 28 134 28 110 C28 92 40 82 45 66 C49 78 53 84 57 87 C54 70 55 55 60 40 Z" fill="url(#lMid)" opacity=".8"/>
+      <path d="M60 78 C66 94 80 104 80 124 C80 140 71 151 60 151 C49 151 40 140 40 124 C40 112 47 106 51 96 C53 104 56 107 58 108 C57 98 57 88 60 78 Z" fill="url(#lCore)" opacity=".85"/>
+    </g>
+  </defs>
+  <use href="#flameBody"/>
+  <use href="#eU" fill="#0f0b0a" opacity=".9"/>
+</svg>
