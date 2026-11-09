@@ -38,6 +38,10 @@ export interface AppSettings {
     /** От чьего имени пишут автоматические сообщения. */
     autoSendAs: 'broadcaster' | 'bot'
   }
+  /** Ник канала для площадок, которые читаются без входа. */
+  goodgame: { channel: string }
+  kick: { channel: string }
+  vk: { channel: string }
   lan: {
     enabled: boolean
     host: string
@@ -66,6 +70,9 @@ export const DEFAULTS: AppSettings = {
   setupMode: null,
   defaultTheme: 'general',
   twitch: { customClientId: '', thirdPartyEmotes: true, autoSendAs: 'broadcaster' },
+  goodgame: { channel: '' },
+  kick: { channel: '' },
+  vk: { channel: '' },
   lan: { enabled: false, host: '', port: 47833 },
   overlays: {
     alert: { theme: 'general' },
@@ -80,6 +87,12 @@ const theme = (v: unknown, d: Theme): Theme => (v === 'general' || v === 'campfi
 const bool = (v: unknown, d: boolean): boolean => (typeof v === 'boolean' ? v : d)
 const int = (v: unknown, d: number, min: number, max: number): number =>
   typeof v === 'number' && Number.isFinite(v) ? Math.min(max, Math.max(min, Math.round(v))) : d
+/** Ник канала: обрезаем пробелы, ссылку превращаем в ник, только безопасные символы. */
+const nick = (v: unknown, d: string): string => {
+  if (typeof v !== 'string') return d
+  const t = v.trim().replace(/^https?:\/\/[^/]+\//, '').replace(/[/?#].*$/, '').replace(/^@/, '')
+  return /^[A-Za-z0-9_.-]{0,40}$/.test(t) ? t : d
+}
 const obj = (v: unknown): Record<string, unknown> => (v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : {})
 
 function chat(v: unknown, d: ChatOverlaySettings): ChatOverlaySettings {
@@ -121,6 +134,9 @@ export function sanitize(input: unknown, base: AppSettings = DEFAULTS): AppSetti
       thirdPartyEmotes: bool(tw.thirdPartyEmotes, base.twitch.thirdPartyEmotes),
       autoSendAs: tw.autoSendAs === 'bot' || tw.autoSendAs === 'broadcaster' ? tw.autoSendAs : base.twitch.autoSendAs
     },
+    goodgame: { channel: nick(obj(i.goodgame).channel, base.goodgame?.channel ?? '') },
+    kick: { channel: nick(obj(i.kick).channel, base.kick?.channel ?? '') },
+    vk: { channel: nick(obj(i.vk).channel, base.vk?.channel ?? '') },
     lan: {
       enabled: bool(lan.enabled, base.lan.enabled),
       host: host === '' || /^(\d{1,3}\.){3}\d{1,3}$/.test(host) ? host : base.lan.host,

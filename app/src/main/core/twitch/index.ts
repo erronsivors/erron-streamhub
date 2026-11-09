@@ -6,6 +6,7 @@ import type { Badge, HubEvent, TwitchState } from '../types'
 import { SHARED_CLIENT_ID, TwitchAuth, type DeviceStart, type Role } from './auth'
 import { EmoteCache } from './emotes'
 import type { ImageCache } from '../imgcache'
+import type { ChatConnector, ChatPlatformState } from '../connector'
 
 const HELIX = 'https://api.twitch.tv/helix'
 const EVENTSUB_URL = 'wss://eventsub.wss.twitch.tv/ws?keepalive_timeout_seconds=30'
@@ -31,7 +32,8 @@ const SUBS: { type: string; version: string; cond: (b: string) => Json }[] = [
 ]
 
 /** Twitch: вход, чат и события через EventSub WebSocket, онлайн, отправка и модерация. */
-export class TwitchConnector {
+export class TwitchConnector implements ChatConnector {
+  readonly id = 'twitch' as const
   readonly auth: TwitchAuth
   private emotes: EmoteCache
   private ws: WebSocket | null = null
@@ -65,6 +67,14 @@ export class TwitchConnector {
       live: this.live,
       viewers: this.viewers,
       emotes: { twitch: true, thirdParty: this.emotes.thirdPartyCount() }
+    }
+  }
+
+  chatState(): ChatPlatformState {
+    const me = this.auth.account('broadcaster')
+    return {
+      id: 'twitch', name: 'Twitch', configured: !!me, live: this.live, viewers: this.viewers,
+      canSend: !!me, canModerate: !!me, account: me?.name ?? null
     }
   }
 
@@ -387,7 +397,9 @@ export class TwitchConnector {
 
   // ---------- действия ----------
 
-  async send(text: string, as: Role = 'broadcaster', replyTo?: string): Promise<void> {
+  async send(text: string, opts: { as?: Role; replyTo?: string } = {}): Promise<void> {
+    const as: Role = opts.as === 'bot' && this.auth.account('bot') ? 'bot' : 'broadcaster'
+    const replyTo = opts.replyTo
     const me = this.auth.account('broadcaster')
     const sender = this.auth.account(as)
     if (!me || !sender) throw new Error(as === 'bot' ? 'Бот не подключён' : 'Twitch не подключён')
@@ -402,7 +414,15 @@ export class TwitchConnector {
     if (r && !r.is_sent) throw new Error(`Сообщение отклонено: ${r.drop_reason?.message ?? 'без причины'}`)
   }
 
-  async deleteMessage(messageId: string): Promise<void> {
+  async deleteMessage(m: HubEvent): Promise<void> {
+    if (m.platform === 'twitch') await this.deleteById(m.id)
+  }
+
+  async ban(m: HubEvent, seconds: number): Promise<void> {
+    if (m.platform === 'twitch' && m.userId) await this.banUser(m.userId, seconds, 'Crossember')
+  }
+
+  async deleteById(messageId: string): Promise<void> {
     const me = this.auth.account('broadcaster')
     if (!me || !/^[\w-]{1,100}$/.test(messageId)) return
     const res = await this.helix(`/moderation/chat?broadcaster_id=${me.id}&moderator_id=${me.id}&message_id=${encodeURIComponent(messageId)}`, { method: 'DELETE' })
@@ -410,7 +430,7 @@ export class TwitchConnector {
   }
 
   /** Таймаут (seconds > 0) или бан (seconds = 0). */
-  async ban(userId: string, seconds: number, reason = ''): Promise<void> {
+  async banUser(userId: string, seconds: number, reason = ''): Promise<void> {
     const me = this.auth.account('broadcaster')
     if (!me || !/^\d{1,20}$/.test(userId)) return
     const data: Json = { user_id: userId, reason: reason.slice(0, 500) }

@@ -212,3 +212,6 @@ select.input { cursor: pointer; }
 .pchip .btn.sm { padding: 3px 10px; font-size: 12px; }
 @keyframes perr { 50% { box-shadow: 0 0 0 3px #ff2d3c44; } }
 .csys { color: var(--warn); font-size: 13px; font-weight: 600; }
+
+.tgt { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--muted); cursor: pointer; white-space: nowrap; }
+.tgt input { accent-color: #9a3fd6; }

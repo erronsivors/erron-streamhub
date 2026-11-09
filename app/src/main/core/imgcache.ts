@@ -14,7 +14,7 @@ import { join } from 'node:path'
  * ответ должен быть картинкой не больше 3 МБ; имена файлов — хэш, никаких путей из сети.
  */
 
-const ALLOWED_HOSTS = new Set(['static-cdn.jtvnw.net', 'cdn.7tv.app', 'cdn.betterttv.net', 'cdn.frankerfacez.com'])
+const ALLOWED_HOSTS = new Set(['static-cdn.jtvnw.net', 'cdn.7tv.app', 'cdn.betterttv.net', 'cdn.frankerfacez.com', 'goodgame.ru', 'static.goodgame.ru', 'files.kick.com', 'images.live.vkvideo.ru'])
 const MAX_BYTES = 3 * 1024 * 1024
 // SVG не принимаем: в нём может быть скрипт.
 const TYPES = ['image/png', 'image/gif', 'image/webp', 'image/avif', 'image/jpeg']

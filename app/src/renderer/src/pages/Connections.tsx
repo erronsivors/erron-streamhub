@@ -5,10 +5,10 @@ import { PlatIcon, fmtTime, useNow } from '../ui'
 
 const STATE_LABEL: Record<ConnStatus['state'], string> = { off: 'Не подключено', connecting: 'Подключение…', ok: 'Подключено', error: 'Ошибка' }
 const STAGE: Partial<Record<Platform, string>> = {
-  youtube: 'этап 2', vk: 'этап 2', kick: 'этап 2', goodgame: 'этап 2',
+  youtube: 'этап 2', vk: 'этап 2',
   donationalerts: 'этап 3', donatepay: 'этап 3', donatex: 'этап 3', boosty: 'этап 3'
 }
-const HINT: Partial<Record<Platform, string>> = { obs: 'obs', twitch: 'twitch' }
+const HINT: Partial<Record<Platform, string>> = { obs: 'obs', twitch: 'twitch', goodgame: 'goodgame', kick: 'kick' }
 
 export function Connections({ snap }: { snap: HubSnapshot }) {
   const [sel, setSel] = useState<Platform>('twitch')
@@ -46,6 +46,7 @@ export function Connections({ snap }: { snap: HubSnapshot }) {
           <p className="muted" style={{ marginTop: 0 }}>{STATE_LABEL[cur.state]} · {cur.detail}</p>
           {cur.id === 'obs' && <ObsForm snap={snap} />}
           {cur.id === 'twitch' && <TwitchPanel snap={snap} />}
+          {(cur.id === 'goodgame' || cur.id === 'kick') && <ChannelPanel key={cur.id} id={cur.id} snap={snap} />}
           {cur.state === 'off' && STAGE[cur.id] && (
             <div className="note">Подключение появится на {STAGE[cur.id]}. Вход — напрямую на площадке; токены шифруются Windows и не покидают ПК.</div>
           )}
@@ -183,6 +184,29 @@ function ObsForm({ snap }: { snap: HubSnapshot }) {
         {snap.obsConfig.hasPassword && <button className="btn sm" disabled={busy} onClick={() => void save(true)}>Удалить пароль</button>}
       </div>
       {msg && <p className="small muted">{msg}</p>}
+    </div>
+  )
+}
+
+/** Площадки, которые читаются без входа: достаточно ника канала. */
+function ChannelPanel({ id, snap }: { id: 'goodgame' | 'kick'; snap: HubSnapshot }) {
+  const saved = snap.settings[id].channel
+  const [nick, setNick] = useState(saved)
+  const p = snap.platforms.find((x) => x.id === id)
+  const site = id === 'goodgame' ? 'goodgame.ru/ник' : 'kick.com/ник'
+  return (
+    <div>
+      <div className="field">
+        <label>Ник канала (как в ссылке {site})</label>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <input className="input" style={{ flex: 1 }} value={nick} onChange={(e) => setNick(e.target.value)} placeholder="например, erron" spellCheck={false} />
+          <button className="btn primary sm" disabled={nick.trim() === saved} onClick={() => void window.hub.setSettings({ [id]: { channel: nick } })}>Сохранить</button>
+          {saved && <button className="btn sm" onClick={() => { setNick(''); void window.hub.setSettings({ [id]: { channel: '' } }) }}>Отключить</button>}
+        </div>
+        <span className="small muted">Можно вставить ссылку на канал целиком — Crossember сам возьмёт ник.</span>
+      </div>
+      {p?.configured && <p className="small muted">{p.live ? 'В эфире · зрителей: ' + (p.viewers ?? 0) : 'Не в эфире'} · режим «только чтение»: писать в этот чат пока можно только на сайте площадки.</p>}
+      {saved && <button className="btn sm" onClick={() => void window.hub.reconnect(id)}>Переподключить</button>}
     </div>
   )
 }

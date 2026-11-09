@@ -39,7 +39,9 @@ export function App() {
   if (!snap) return <div className="empty">Запуск…</div>
   const { obs, twitch } = snap
   const okCount = snap.connections.filter((c) => c.state === 'ok').length
-  const live = obs.streaming || twitch.live
+  const live = obs.streaming || snap.platforms.some((p) => p.live)
+  const counted = snap.platforms.filter((p) => p.viewers !== null)
+  const totalViewers = counted.length ? counted.reduce((a, p) => a + (p.viewers ?? 0), 0) : null
 
   return (
     <ModeContext.Provider value={snap.settings.setupMode}>
@@ -78,7 +80,7 @@ export function App() {
               {live ? 'В эфире' : obs.connected || twitch.broadcaster ? 'Не в эфире' : 'Ничего не подключено'}
             </span>
             {obs.streaming && obs.streamStartedAt && <span className="mono">{fmtDuration(now - obs.streamStartedAt)}</span>}
-            {twitch.viewers !== null && <span>👁 {twitch.viewers}</span>}
+            {totalViewers !== null && <span title="Зрители на всех площадках">👁 {totalViewers}</span>}
             {obs.recording && <span>● Запись</span>}
             {obs.scene && <span>Сцена: <b style={{ color: 'var(--ink)' }}>{obs.scene}</b></span>}
             <div className="right">

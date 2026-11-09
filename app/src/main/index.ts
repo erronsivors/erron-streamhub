@@ -9,6 +9,9 @@ import { ObsConnector } from './core/obs'
 import { TwitchConnector } from './core/twitch'
 import { ImageCache } from './core/imgcache'
 import { FloatChat, FLOAT_HOTKEY } from './core/floatchat'
+import { ChatRegistry } from './core/connector'
+import { GoodGameConnector } from './core/goodgame'
+import { KickConnector } from './core/kick'
 import type { HubEvent, HubSnapshot, Platform } from './core/types'
 
 // Один экземпляр приложения: второй запуск просто показывает окно.
@@ -25,10 +28,11 @@ let server: OverlayServer
 let obs: ObsConnector
 let twitch: TwitchConnector
 let floatChat: FloatChat
+const chats = new ChatRegistry()
 
 // Площадки следующих этапов — видны в «Подключениях» как «Не настроено».
 const PLANNED: [Platform, string][] = [
-  ['youtube', 'YouTube'], ['vk', 'VK Видео Live'], ['kick', 'Kick'], ['goodgame', 'GoodGame'],
+  ['youtube', 'YouTube'], ['vk', 'VK Видео Live'],
   ['donationalerts', 'DonationAlerts'], ['donatepay', 'DonatePay'], ['donatex', 'DonateX'], ['boosty', 'Boosty']
 ]
 
@@ -43,6 +47,7 @@ function snapshot(): HubSnapshot {
     obsConfig: obs.config(),
     settings: settings.get(),
     twitch: twitch.state(),
+    platforms: chats.states(),
     float: { open: floatChat?.isOpen ?? false, editing: floatChat?.isEditing ?? false, hotkey: FLOAT_HOTKEY.replace('CommandOrControl', 'Ctrl') }
   }
 }
@@ -130,6 +135,13 @@ app.whenReady().then(async () => {
   const images = new ImageCache(join(app.getPath('userData'), 'cache', 'img'))
   images.preconnect()
   twitch = new TwitchConnector(hub, settings, secrets, images)
+  chats.add(twitch)
+  const goodgame = new GoodGameConnector(hub, settings, images, join(app.getPath('userData'), 'cache'))
+  const kick = new KickConnector(hub, settings, images)
+  chats.add(goodgame)
+  chats.add(kick)
+  goodgame.onChange = pushUpdate
+  kick.onChange = pushUpdate
   for (const [id, name] of PLANNED) hub.register(id, name)
   hub.seed(store.recentEvents(100))
   if (!secrets.available()) hub.log('hub', 'error', 'Шифрование Windows недоступно — токены сохранять нельзя')
@@ -142,7 +154,7 @@ app.whenReady().then(async () => {
   })
 
   server = new OverlayServer(hub, store, settings, images, resourcesDir, app.getAppPath(), {
-    send: (text) => twitch.send(text, 'broadcaster'),
+    send: (text) => chats.send(text, chats.states().filter((p) => p.canSend).map((p) => p.id), 'broadcaster'),
     pin: (id) => hub.togglePin(id)
   })
   obs.onChange = pushUpdate
@@ -155,6 +167,8 @@ app.whenReady().then(async () => {
     server.pushConfig()
     if (s.setupMode !== prev.setupMode || JSON.stringify(s.lan) !== JSON.stringify(prev.lan)) void server.applyLan().then(pushUpdate)
     floatChat.apply()
+    if (s.goodgame.channel !== prev.goodgame.channel) void goodgame.restart()
+    if (s.kick.channel !== prev.kick.channel) void kick.restart()
     if (s.twitch.customClientId !== prev.twitch.customClientId || s.twitch.thirdPartyEmotes !== prev.twitch.thirdPartyEmotes) void twitch.restart()
     prev = s
     pushUpdate()
@@ -188,24 +202,28 @@ app.whenReady().then(async () => {
   handle('hub:floatEdit', () => floatChat.toggleEdit())
   handle('hub:floatReset', () => floatChat.reset())
   handle('hub:reconnect', (p) => {
-    if (p === 'twitch') return twitch.restart()
     if (p === 'obs') return obs.reconnect()
+    return chats.get(p as Platform)?.restart()
   })
   handle('hub:twitchLogin', (r) => twitch.login(role(r)))
   handle('hub:twitchCancel', () => twitch.cancelLogin())
   handle('hub:twitchLogout', (r) => twitch.logout(role(r)))
   handle('hub:twitchRestart', () => twitch.restart())
-  handle('hub:chatSend', (text, as) => twitch.send(str(text), role(as)))
+  handle('hub:chatSend', (text, as, targets) => {
+    const list = Array.isArray(targets) ? (targets.filter((t) => typeof t === 'string') as Platform[]) : []
+    return chats.send(str(text), list, role(as))
+  })
   handle('hub:chatPin', (id) => hub.togglePin(id === null ? null : str(id, 100)))
   handle('hub:chatDelete', async (id) => {
     const m = hub.findMessage(str(id, 100))
-    if (m?.test) return hub.deleteMessage(m.id)
-    if (m?.platform === 'twitch') await twitch.deleteMessage(m.id)
+    if (!m) return
+    if (m.test) return hub.deleteMessage(m.id)
+    await chats.get(m.platform)?.deleteMessage?.(m)
   })
   handle('hub:chatBan', async (id, seconds) => {
     const m = hub.findMessage(str(id, 100))
     const sec = typeof seconds === 'number' ? seconds : 0
-    if (m?.platform === 'twitch' && m.userId && !m.test) await twitch.ban(m.userId, sec, 'Crossember')
+    if (m && !m.test) await chats.get(m.platform)?.ban?.(m, sec)
   })
 
   createWindow()
@@ -216,7 +234,7 @@ app.whenReady().then(async () => {
     hub.setStatus('hub', 'error', `Сервер не запустился: ${(e as Error).message}`)
   }
   await obs.start()
-  void twitch.start()
+  void chats.startAll()
   floatChat.apply()
   pushUpdate()
 })
@@ -224,7 +242,7 @@ app.whenReady().then(async () => {
 app.on('window-all-closed', () => app.quit())
 app.on('before-quit', () => {
   floatChat?.close()
-  twitch?.stop()
+  chats.stopAll()
   void obs?.stop()
   void server?.stop()
   store?.close()

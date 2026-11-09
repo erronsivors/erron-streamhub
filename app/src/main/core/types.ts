@@ -1,5 +1,6 @@
 // Общие типы ядра. Те же типы использует интерфейс (через preload).
 import type { AppSettings } from './settings'
+import type { ChatPlatformState } from './connector'
 
 export type Platform = 'twitch' | 'youtube' | 'vk' | 'kick' | 'goodgame' | 'donationalerts' | 'donatepay' | 'donatex' | 'boosty' | 'obs' | 'hub'
 
@@ -99,5 +100,6 @@ export interface HubSnapshot {
   obsConfig: { url: string; hasPassword: boolean }
   settings: AppSettings
   twitch: TwitchState
+  platforms: ChatPlatformState[]
   float: { open: boolean; editing: boolean; hotkey: string }
 }

@@ -22,6 +22,8 @@ function Parts({ m }: { m: HubEvent }) {
 export function Chat({ snap }: { snap: HubSnapshot }) {
   const [text, setText] = useState('')
   const [as, setAs] = useState<'broadcaster' | 'bot'>('broadcaster')
+  // Куда отправлять: по умолчанию во все площадки, где можно писать. Снятые галочки запоминаются на время работы.
+  const [off, setOff] = useState<string[]>([])
   const [err, setErr] = useState<string | null>(null)
   const [paused, setPaused] = useState(false)
   const [confirmBan, setConfirmBan] = useState<string | null>(null)
@@ -51,12 +53,14 @@ export function Chat({ snap }: { snap: HubSnapshot }) {
     const t = text.trim()
     if (!t) return
     void act(async () => {
-      await window.hub.chatSend(t, as)
+      await window.hub.chatSend(t, as, targets)
       setText('')
     })
   }
 
-  const canWrite = !!twitch.broadcaster
+  const writable = snap.platforms.filter((p) => p.canSend)
+  const targets = writable.map((p) => p.id).filter((id) => !off.includes(id))
+  const canWrite = targets.length > 0
   return (
     <>
       <div className="head">
@@ -111,11 +115,17 @@ export function Chat({ snap }: { snap: HubSnapshot }) {
               maxLength={500}
               value={text}
               disabled={!canWrite}
-              placeholder={canWrite ? 'Написать в чат Twitch…' : 'Подключите Twitch, чтобы писать в чат'}
+              placeholder={canWrite ? `Написать в: ${writable.filter((p) => targets.includes(p.id)).map((p) => p.name).join(', ')}…` : writable.length ? 'Выберите площадки для отправки' : 'Подключите площадку, чтобы писать в чат'}
               onChange={(e) => setText(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && send()}
             />
-            {twitch.bot && (
+            {writable.length > 1 && writable.map((p) => (
+              <label key={p.id} className="tgt" title={`Отправлять в ${p.name}`}>
+                <input type="checkbox" checked={targets.includes(p.id)} onChange={(e) => setOff(e.target.checked ? off.filter((x) => x !== p.id) : [...off, p.id])} />
+                <span className="cplat" style={{ background: PLATFORM[p.id].color }} />{p.name}
+              </label>
+            ))}
+            {twitch.bot && targets.includes('twitch') && (
               <select className="input" value={as} onChange={(e) => setAs(e.target.value as 'broadcaster' | 'bot')}>
                 <option value="broadcaster">от {twitch.broadcaster?.name ?? 'стримера'}</option>
                 <option value="bot">от бота {twitch.bot.name}</option>
@@ -129,7 +139,7 @@ export function Chat({ snap }: { snap: HubSnapshot }) {
         <div className="card" style={{ alignSelf: 'start' }}>
           <h3>Эфир</h3>
           <div className="kv">
-            <div><span>Twitch</span><b>{twitch.viewers ?? '—'}</b></div>
+            {snap.platforms.filter((p) => p.configured).map((p) => <div key={p.id}><span>{p.name}</span><b>{p.viewers ?? '—'}</b></div>)}
             <div><span>Сообщений</span><b>{snap.chat.length}</b></div>
           </div>
           <h3 style={{ marginTop: 18 }}>Закреп в OBS</h3>
@@ -154,7 +164,7 @@ function PlatformStrip({ snap }: { snap: HubSnapshot }) {
         <div key={c.id} className={`pchip ${c.state}`} title={c.detail}>
           <span className="cplat" style={{ background: PLATFORM[c.id].color }} />
           <b>{c.name}</b>
-          {c.state === 'ok' && c.id === 'twitch' && snap.twitch.viewers !== null && <span className="muted">👁 {snap.twitch.viewers}</span>}
+          {c.state === 'ok' && (snap.platforms.find((p) => p.id === c.id)?.viewers ?? null) !== null && <span className="muted">👁 {snap.platforms.find((p) => p.id === c.id)?.viewers}</span>}
           {c.state === 'connecting' && <span className="muted">подключение…</span>}
           {c.state === 'error' && <span className="perr">{c.detail}</span>}
           {c.state !== 'ok' && <button className="btn sm" onClick={() => void window.hub.reconnect(c.id)}>Переподключить</button>}
