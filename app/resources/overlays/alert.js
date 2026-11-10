@@ -1,56 +1,61 @@
 'use strict';
+// Оверлей алертов. Очередь живёт в Crossember: оверлей только показывает то, что пришло ('alert'),
+// и прячет по команде ('alert-end'). Поэтому пауза, пропуск и «стоп всё» работают из приложения.
 const stage = document.getElementById('stage');
-const queue = [];
-let busy = false;
-const KIND = {
-  donation: ['₽', 'Новый донат'], sub: ['★', 'Подписка'], gift: ['🎁', 'Подарочные подписки'], follow: ['♥', 'Новый фолловер'],
-  raid: ['↗', 'Рейд'], bits: ['◆', 'Биты'], reward: ['✦', 'Награда за баллы']
-};
+const ICON = { donation: '₽', sub: '★', gift: '🎁', follow: '♥', raid: '↗', bits: '◆', reward: '✦' };
+let shownId = null;
+let audio = null;
 
-function amountText(e) {
-  if (!e.amount) return '';
-  if (e.type === 'donation') return e.amount.toLocaleString('ru-RU') + ' ' + (e.currency === 'RUB' ? '₽' : (e.currency || ''));
-  if (e.type === 'bits') return e.amount + ' бит';
-  return '';
-}
-
-function render(e) {
-  const k = KIND[e.type] || ['!', e.type];
-  const box = CB.el('div', 'alert card');
-  box.append(CB.el('div', 'icon', k[0]));
+function render(a) {
+  const box = CB.el('div', 'alert card k-' + a.kind);
+  box.append(CB.el('div', 'icon', ICON[a.kind] || '!'));
   const body = CB.el('div');
-  const kicker = CB.el('div', 'kicker', k[1]);
-  if (e.test) kicker.append(CB.el('span', 'test', 'ТЕСТ'));
-  const who = CB.el('div', 'who', e.user);
-  const amt = amountText(e);
-  if (amt) who.append(CB.el('span', 'amt grad', amt));
+  const kicker = CB.el('div', 'kicker', a.kicker);
+  if (a.test) kicker.append(CB.el('span', 'test', 'ТЕСТ'));
+  const who = CB.el('div', 'who');
+  for (const p of a.title || []) who.append(p.t === 'amount' ? CB.el('span', 'amt grad', p.v) : document.createTextNode(p.v));
   body.append(kicker, who);
-  if (e.text) body.append(CB.el('div', 'text', e.text));
+  if (a.text) body.append(CB.el('div', 'text', a.text));
   box.append(body);
   return box;
 }
 
-async function playNext() {
-  if (busy || !queue.length) return;
-  busy = true;
-  const e = queue.shift();
-  const box = render(e);
-  stage.replaceChildren(box);
-  requestAnimationFrame(() => requestAnimationFrame(() => box.classList.add('show')));
-  await new Promise((r) => setTimeout(r, 5000 + Math.min((e.text || '').length * 40, 5000)));
+function sound(a) {
+  if (audio) { audio.pause(); audio = null; }
+  if (!a.sound || !(a.volume > 0)) return;
+  if (a.sound.builtin) return CBSound.play(a.sound.builtin, a.volume);
+  // Свой файл: только с нашего сервера по строгому шаблону.
+  if (typeof a.sound.url === 'string' && /^\/s\/[0-9a-f]{32}\.(mp3|wav|ogg)$/.test(a.sound.url)) {
+    audio = new Audio(a.sound.url + '?k=' + encodeURIComponent(CB.key));
+    audio.volume = Math.min(1, a.volume);
+    audio.play().catch(() => {});
+  }
+}
+
+function hide() {
+  const box = stage.firstElementChild;
+  shownId = null;
+  if (!box) return;
   box.classList.remove('show');
-  await new Promise((r) => setTimeout(r, 600));
+  setTimeout(() => { if (box.parentNode && !box.classList.contains('show')) box.remove(); }, 600);
+}
+
+function show(a) {
   stage.replaceChildren();
-  busy = false;
-  setTimeout(playNext, 400);
+  const box = render(a);
+  stage.append(box);
+  shownId = a.id;
+  requestAnimationFrame(() => requestAnimationFrame(() => box.classList.add('show')));
+  sound(a);
 }
 
 CB.on('hello', (d) => CB.theme(d.overlays.alert.theme));
 CB.on('config', (d) => CB.theme(d.overlays.alert.theme));
-CB.on('event', (d) => {
-  const e = d.event;
-  if (!e || e.type === 'message' || e.type === 'system') return;
-  queue.push(e);
-  playNext();
+CB.on('alert', (d) => { if (d.alert) show(d.alert); });
+CB.on('alert-end', (d) => {
+  if (d.id === shownId) {
+    hide();
+    if (audio) { audio.pause(); audio = null; }
+  }
 });
 CB.connect();

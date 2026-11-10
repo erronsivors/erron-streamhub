@@ -13,6 +13,12 @@ export function clean(s: unknown, max = 500): string {
   return String(s ?? '').replace(/[\u0000-\u001f\u007f]/g, ' ').slice(0, max)
 }
 
+/** Сумма: конечное неотрицательное число, иначе ничего. */
+function num(v: unknown): number | undefined {
+  const n = typeof v === 'string' ? Number(v) : v
+  return typeof n === 'number' && Number.isFinite(n) && n >= 0 ? Math.round(n * 100) / 100 : undefined
+}
+
 /** Цвет ника: только #RRGGBB, иначе ничего. */
 export function cleanColor(c: unknown): string | undefined {
   return typeof c === 'string' && /^#[0-9a-fA-F]{6}$/.test(c) ? c : undefined
@@ -87,7 +93,9 @@ export class Hub extends EventEmitter {
       parts,
       color: cleanColor(e.color),
       badges: e.badges?.slice(0, 8).map((b) => ({ title: clean(b.title, 64), url: b.url })),
-      currency: e.currency === undefined ? undefined : clean(e.currency, 8)
+      currency: e.currency === undefined ? undefined : clean(e.currency, 8).toUpperCase(),
+      amount: num(e.amount),
+      amountRub: num(e.amountRub) ?? (e.currency?.toUpperCase() === 'RUB' && e.type === 'donation' ? num(e.amount) : undefined)
     }
     const inChat = ev.type === 'message' || ev.type === 'system'
     const list = inChat ? this.chat : this.events

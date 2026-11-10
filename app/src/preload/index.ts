@@ -1,5 +1,7 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
 import type { HubSnapshot } from '../main/core/types'
+import type { StatsSnapshot } from '../main/core/stats'
+import type { SoundInfo } from '../main/core/sounds'
 import type { AppSettings } from '../main/core/settings'
 
 type DeepPartial<T> = { [K in keyof T]?: T[K] extends object ? DeepPartial<T[K]> : T[K] }
@@ -15,7 +17,26 @@ const api = {
   rotateKey: (which: 'overlay' | 'remote') => call('hub:rotateKey', which),
   copy: (text: string) => call('hub:copy', text),
   openExternal: (url: string) => call('hub:openExternal', url),
-  testEvent: (kind: 'donation' | 'sub' | 'follow' | 'raid' | 'message') => call('hub:testEvent', kind),
+  testEvent: (kind: 'donation' | 'bigdonation' | 'sub' | 'follow' | 'raid' | 'gift' | 'bits' | 'reward' | 'boosty' | 'message') => call('hub:testEvent', kind),
+  alertPause: (v: boolean) => call('hub:alertPause', v),
+  alertSkip: () => call('hub:alertSkip'),
+  alertStopAll: () => call('hub:alertStopAll'),
+  alertRemove: (id: string) => call('hub:alertRemove', id),
+  alertReplay: (eventId: string) => call<boolean>('hub:alertReplay', eventId),
+  stats: (period: string) => call<StatsSnapshot>('hub:stats', period),
+  soundAdd: () => call<SoundInfo | null>('hub:soundAdd'),
+  soundRemove: (id: string) => call('hub:soundRemove', id),
+  daLogin: () => call('hub:daLogin'),
+  daCancel: () => call('hub:daCancel'),
+  dpKey: (key: string) => call('hub:dpKey', key),
+  dxLogin: () => call('hub:dxLogin'),
+  dxCancel: () => call('hub:dxCancel'),
+  dxToken: (token: string) => call('hub:dxToken', token),
+  boostyLogin: () => call('hub:boostyLogin'),
+  boostyCancel: () => call('hub:boostyCancel'),
+  openSite: (id: string) => call('hub:openSite', id),
+  clearSite: (id: string) => call('hub:clearSite', id),
+  donationLogout: (platform: string) => call('hub:donationLogout', platform),
   reconnect: (platform: string) => call('hub:reconnect', platform),
   floatEdit: () => call('hub:floatEdit'),
   floatReset: () => call('hub:floatReset'),

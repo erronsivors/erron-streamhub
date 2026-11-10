@@ -20,6 +20,9 @@ export class Store {
       );
       CREATE INDEX IF NOT EXISTS events_ts ON events(ts);
     `)
+    // Миграция: сумма в рублях для статистики (этап 3).
+    const cols = this.db.prepare('PRAGMA table_info(events)').all() as { name: string }[]
+    if (!cols.some((c) => c.name === 'amount_rub')) this.db.exec('ALTER TABLE events ADD COLUMN amount_rub REAL')
   }
 
   get<T>(key: string, fallback: T): T {
@@ -48,8 +51,8 @@ export class Store {
   }
 
   addEvent(e: HubEvent): void {
-    this.db.prepare('INSERT OR IGNORE INTO events(id, ts, platform, type, user, text, amount, currency, test) VALUES(?,?,?,?,?,?,?,?,?)')
-      .run(e.id, e.ts, e.platform, e.type, e.user, e.text ?? null, e.amount ?? null, e.currency ?? null, e.test ? 1 : 0)
+    this.db.prepare('INSERT OR IGNORE INTO events(id, ts, platform, type, user, text, amount, currency, test, amount_rub) VALUES(?,?,?,?,?,?,?,?,?,?)')
+      .run(e.id, e.ts, e.platform, e.type, e.user, e.text ?? null, e.amount ?? null, e.currency ?? null, e.test ? 1 : 0, e.amountRub ?? null)
   }
 
   recentEvents(limit = 100): HubEvent[] {
@@ -57,8 +60,40 @@ export class Store {
     return rows.map((r) => ({
       id: String(r.id), ts: Number(r.ts), platform: r.platform as HubEvent['platform'], type: r.type as HubEvent['type'],
       user: String(r.user), text: (r.text as string) ?? undefined, amount: (r.amount as number) ?? undefined,
-      currency: (r.currency as string) ?? undefined, test: r.test === 1
+      currency: (r.currency as string) ?? undefined, test: r.test === 1, amountRub: (r.amount_rub as number) ?? undefined
     }))
+  }
+
+  /** Есть ли уже событие с таким id (защита от повторов при переподключении). */
+  hasEvent(id: string): boolean {
+    return !!this.db.prepare('SELECT 1 FROM events WHERE id = ?').get(id)
+  }
+
+  /** Итоги с момента since (тестовые не считаются). */
+  totals(since: number): { type: string; platform: string; count: number; rub: number }[] {
+    return this.db.prepare(
+      'SELECT type, platform, COUNT(*) AS count, COALESCE(SUM(amount_rub), 0) AS rub FROM events WHERE test = 0 AND ts >= ? AND type != ? GROUP BY type, platform'
+    ).all(since, 'message') as { type: string; platform: string; count: number; rub: number }[]
+  }
+
+  /** Топ донатеров по сумме в рублях с момента since. Один ник с разных сервисов складывается. */
+  topDonors(since: number, limit: number): { user: string; rub: number; count: number }[] {
+    return this.db.prepare(
+      `SELECT MAX(user) AS user, SUM(amount_rub) AS rub, COUNT(*) AS count FROM events
+       WHERE test = 0 AND type = 'donation' AND amount_rub IS NOT NULL AND ts >= ?
+       GROUP BY LOWER(user) ORDER BY rub DESC LIMIT ?`
+    ).all(since, limit) as { user: string; rub: number; count: number }[]
+  }
+
+  /** Последнее настоящее событие указанного типа. */
+  lastEvent(type: string): HubEvent | null {
+    const r = this.db.prepare('SELECT * FROM events WHERE test = 0 AND type = ? ORDER BY ts DESC LIMIT 1').get(type) as Record<string, unknown> | undefined
+    if (!r) return null
+    return {
+      id: String(r.id), ts: Number(r.ts), platform: r.platform as HubEvent['platform'], type: r.type as HubEvent['type'],
+      user: String(r.user), text: (r.text as string) ?? undefined, amount: (r.amount as number) ?? undefined,
+      currency: (r.currency as string) ?? undefined, amountRub: (r.amount_rub as number) ?? undefined
+    }
   }
 
   close(): void {

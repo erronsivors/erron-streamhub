@@ -27,5 +27,6 @@ body.t-campfire {
 .badge { height: 1em; vertical-align: -0.12em; margin-right: 0.25em; }
 .plat { display: inline-block; width: .55em; height: .55em; border-radius: 50%; margin-right: .4em; vertical-align: .12em; }
 .p-twitch { background: #9146ff; } .p-youtube { background: #ff0033; } .p-vk { background: #0077ff; } .p-kick { background: #53fc18; } .p-goodgame { background: #7d9cff; }
+.p-donationalerts { background: #f57d07; } .p-donatepay { background: #2fbf71; } .p-donatex { background: #ff4f8b; } .p-boosty { background: #f15f2c; }
 .name { font-weight: 800; margin-right: .35em; }
 .grad { background: var(--grad); -webkit-background-clip: text; background-clip: text; color: transparent; }

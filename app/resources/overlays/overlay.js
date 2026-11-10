@@ -48,12 +48,17 @@ const CB = (() => {
     document.body.classList.add(t === 'campfire' ? 't-campfire' : 't-general');
   };
   const on = (kind, fn) => { handlers[kind] = fn; };
-  const api = { el, img, parts, line, theme, on, connect: null, send: null, ws: null };
+  const api = { el, img, parts, line, theme, on, key, build: '', connect: null, send: null, ws: null };
   api.connect = () => {
     const ws = new WebSocket('ws://' + location.host + '/ws?k=' + encodeURIComponent(key));
     ws.onmessage = (m) => {
       let d;
       try { d = JSON.parse(m.data); } catch { return; }
+      // Новая версия Crossember — перезагрузить страницу, чтобы OBS взял свежий код оверлея.
+      if (d.kind === 'hello' && d.build) {
+        if (api.build && api.build !== d.build) { location.reload(); return; }
+        api.build = d.build;
+      }
       (handlers[d.kind] || (() => {}))(d);
     };
     ws.onclose = (c) => {

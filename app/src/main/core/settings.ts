@@ -28,6 +28,48 @@ export interface FloatChatSettings extends ChatOverlaySettings {
   bounds: { x: number; y: number; width: number; height: number } | null
 }
 
+/** Типы событий, у которых бывают алерты. */
+export const ALERT_KINDS = ['donation', 'sub', 'gift', 'follow', 'raid', 'bits', 'reward'] as const
+export type AlertKind = (typeof ALERT_KINDS)[number]
+/** Встроенные звуки (синтезируются в оверлее, файлов нет) или свой файл custom:<id>. */
+export const BUILTIN_SOUNDS = ['none', 'chime', 'coin', 'fire', 'pop', 'fanfare'] as const
+
+/** Вариант алерта по сумме: от суммы «from» — свой заголовок, звук, длительность. */
+export interface AlertTier {
+  from: number
+  kicker: string
+  sound: string
+  durationSec: number
+}
+
+/** Правило алерта для одного типа события. */
+export interface AlertRule {
+  enabled: boolean
+  /** Минимальная сумма (₽ / биты / зрители рейда); меньше — без алерта, только в ленте. */
+  minAmount: number
+  /** Верхняя строка («Новый донат»). */
+  kicker: string
+  /** Главная строка: {user}, {amount}, {platform}. */
+  title: string
+  showMessage: boolean
+  sound: string
+  /** Громкость звука, %. */
+  volume: number
+  durationSec: number
+  tiers: AlertTier[]
+}
+
+export interface AlertSettings {
+  enabled: boolean
+  /** Пауза между алертами, сек. */
+  gapSec: number
+  /** Общая громкость, %. */
+  volume: number
+  rules: Record<AlertKind, AlertRule>
+}
+
+export type StatsPeriod = 'stream' | 'today' | 'week' | 'month' | 'all'
+
 export interface AppSettings {
   setupMode: SetupMode | null
   defaultTheme: Theme
@@ -44,6 +86,13 @@ export interface AppSettings {
   goodgame: { channel: string }
   kick: { channel: string }
   vk: { channel: string }
+  /** DonationAlerts: свой ID приложения (необязательно). Пусто — общее приложение Crossember. */
+  donationalerts: { customClientId: string }
+  /** DonateX: свой client_id OAuth (необязательно). Пусто — общее приложение Crossember. */
+  donatex: { customClientId: string }
+  /** Boosty: опрос внутреннего API (неофициально, только чтение). */
+  boosty: { poll: boolean }
+  alerts: AlertSettings
   lan: {
     enabled: boolean
     host: string
@@ -54,6 +103,8 @@ export interface AppSettings {
     chat: ChatOverlaySettings
     chatH: ChatOverlaySettings
     pinned: { theme: Theme; fontSize: number }
+    top: { theme: Theme; period: StatsPeriod; count: number; fontSize: number }
+    last: { theme: Theme; fontSize: number; showSub: boolean }
   }
   float: FloatChatSettings
 }
@@ -68,6 +119,28 @@ const chatDefaults = (horizontal: boolean): ChatOverlaySettings => ({
   showStatus: false
 })
 
+const rule = (kicker: string, title: string, sound: string, extra: Partial<AlertRule> = {}): AlertRule => ({
+  enabled: true, minAmount: 0, kicker, title, showMessage: true, sound, volume: 80, durationSec: 6, tiers: [], ...extra
+})
+
+export const ALERT_DEFAULTS: AlertSettings = {
+  enabled: true,
+  gapSec: 1,
+  volume: 80,
+  rules: {
+    donation: rule('Новый донат', '{user} — {amount}', 'coin', {
+      durationSec: 7,
+      tiers: [{ from: 1000, kicker: 'Крупный донат!', sound: 'fanfare', durationSec: 10 }]
+    }),
+    sub: rule('Подписка', '{user}', 'chime'),
+    gift: rule('Подарочные подписки', '{user} дарит {amount}', 'fanfare'),
+    follow: rule('Новый фолловер', '{user}', 'pop', { durationSec: 4, showMessage: false }),
+    raid: rule('Рейд', '{user} — {amount} зрителей', 'fire', { durationSec: 8 }),
+    bits: rule('Биты', '{user} — {amount}', 'coin'),
+    reward: rule('Награда за баллы', '{user}', 'pop', { enabled: false })
+  }
+}
+
 export const DEFAULTS: AppSettings = {
   setupMode: null,
   defaultTheme: 'general',
@@ -76,12 +149,18 @@ export const DEFAULTS: AppSettings = {
   goodgame: { channel: '' },
   kick: { channel: '' },
   vk: { channel: '' },
+  donationalerts: { customClientId: '' },
+  donatex: { customClientId: '' },
+  boosty: { poll: false },
+  alerts: ALERT_DEFAULTS,
   lan: { enabled: false, host: '', port: 47833 },
   overlays: {
     alert: { theme: 'general' },
     chat: chatDefaults(false),
     chatH: chatDefaults(true),
-    pinned: { theme: 'general', fontSize: 34 }
+    pinned: { theme: 'general', fontSize: 34 },
+    top: { theme: 'general', period: 'stream', count: 5, fontSize: 24 },
+    last: { theme: 'general', fontSize: 26, showSub: true }
   },
   float: { ...chatDefaults(false), fontSize: 18, maxMessages: 12, hideAfterSec: 45, showStatus: true, enabled: false, bgOpacity: 55, bounds: null }
 }
@@ -117,6 +196,53 @@ function chat(v: unknown, d: ChatOverlaySettings): ChatOverlaySettings {
   }
 }
 
+const text = (v: unknown, d: string, max = 80): string => (typeof v === 'string' ? v.replace(/[\u0000-\u001f\u007f]/g, ' ').slice(0, max) : d)
+const sound = (v: unknown, d: string): string =>
+  typeof v === 'string' && ((BUILTIN_SOUNDS as readonly string[]).includes(v) || /^custom:[0-9a-f]{32}\.(mp3|wav|ogg)$/.test(v)) ? v : d
+const period = (v: unknown, d: StatsPeriod): StatsPeriod =>
+  v === 'stream' || v === 'today' || v === 'week' || v === 'month' || v === 'all' ? v : d
+/** Публичный ID приложения: только буквы, цифры, дефис, подчёркивание. */
+const appId = (v: unknown, d: string): string => {
+  if (typeof v !== 'string') return d
+  const t = v.trim()
+  return /^[\w-]{0,100}$/.test(t) ? t : d
+}
+
+function alertRule(v: unknown, d: AlertRule): AlertRule {
+  const o = obj(v)
+  const tiers = Array.isArray(o.tiers) ? o.tiers : d.tiers
+  return {
+    enabled: bool(o.enabled, d.enabled),
+    minAmount: int(o.minAmount, d.minAmount, 0, 10_000_000),
+    kicker: text(o.kicker, d.kicker, 60),
+    title: text(o.title, d.title, 80),
+    showMessage: bool(o.showMessage, d.showMessage),
+    sound: sound(o.sound, d.sound),
+    volume: int(o.volume, d.volume, 0, 100),
+    durationSec: int(o.durationSec, d.durationSec, 2, 60),
+    tiers: tiers
+      .slice(0, 5)
+      .map((t) => {
+        const x = obj(t)
+        return {
+          from: int(x.from, 1000, 1, 10_000_000),
+          kicker: text(x.kicker, d.kicker, 60),
+          sound: sound(x.sound, d.sound),
+          durationSec: int(x.durationSec, d.durationSec, 2, 60)
+        }
+      })
+      .sort((a, b) => a.from - b.from)
+  }
+}
+
+function alerts(v: unknown, d: AlertSettings): AlertSettings {
+  const o = obj(v)
+  const r = obj(o.rules)
+  const rules = {} as Record<AlertKind, AlertRule>
+  for (const k of ALERT_KINDS) rules[k] = alertRule(r[k], d.rules?.[k] ?? ALERT_DEFAULTS.rules[k])
+  return { enabled: bool(o.enabled, d.enabled), gapSec: int(o.gapSec, d.gapSec, 0, 30), volume: int(o.volume, d.volume, 0, 100), rules }
+}
+
 function float(v: unknown, d: FloatChatSettings): FloatChatSettings {
   const o = obj(v)
   const b = o.bounds === null ? null : obj(o.bounds)
@@ -147,6 +273,10 @@ export function sanitize(input: unknown, base: AppSettings = DEFAULTS): AppSetti
     goodgame: { channel: nick(obj(i.goodgame).channel, base.goodgame?.channel ?? '') },
     kick: { channel: nick(obj(i.kick).channel, base.kick?.channel ?? '') },
     vk: { channel: nick(obj(i.vk).channel, base.vk?.channel ?? '') },
+    donationalerts: { customClientId: appId(obj(i.donationalerts).customClientId, base.donationalerts?.customClientId ?? '') },
+    donatex: { customClientId: appId(obj(i.donatex).customClientId, base.donatex?.customClientId ?? '') },
+    boosty: { poll: bool(obj(i.boosty).poll, base.boosty?.poll ?? false) },
+    alerts: alerts(i.alerts, base.alerts ?? ALERT_DEFAULTS),
     lan: {
       enabled: bool(lan.enabled, base.lan.enabled),
       host: host === '' || /^(\d{1,3}\.){3}\d{1,3}$/.test(host) ? host : base.lan.host,
@@ -159,7 +289,17 @@ export function sanitize(input: unknown, base: AppSettings = DEFAULTS): AppSetti
       pinned: {
         theme: theme(obj(ov.pinned).theme, base.overlays.pinned.theme),
         fontSize: int(obj(ov.pinned).fontSize, base.overlays.pinned.fontSize, 12, 96)
-      }
+      },
+      top: (() => {
+        const o = obj(ov.top)
+        const b = base.overlays.top ?? DEFAULTS.overlays.top
+        return { theme: theme(o.theme, b.theme), period: period(o.period, b.period), count: int(o.count, b.count, 1, 20), fontSize: int(o.fontSize, b.fontSize, 12, 72) }
+      })(),
+      last: (() => {
+        const o = obj(ov.last)
+        const b = base.overlays.last ?? DEFAULTS.overlays.last
+        return { theme: theme(o.theme, b.theme), fontSize: int(o.fontSize, b.fontSize, 12, 72), showSub: bool(o.showSub, b.showSub) }
+      })()
     },
     float: float(i.float, base.float ?? DEFAULTS.float)
   }

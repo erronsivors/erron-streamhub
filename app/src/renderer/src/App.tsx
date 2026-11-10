@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import type { HubSnapshot } from '../../main/core/types'
+import type { HubSnapshot, Platform } from '../../main/core/types'
 import mark from './assets/mark.svg'
 import { Home } from './pages/Home'
 import { Chat } from './pages/Chat'
@@ -7,7 +7,7 @@ import { Connections } from './pages/Connections'
 import { Events } from './pages/Events'
 import { Overlays } from './pages/Overlays'
 import { Settings } from './pages/Settings'
-import { Soon } from './pages/Soon'
+import { Alerts } from './pages/Alerts'
 import { Wizard } from './pages/Wizard'
 import { ModeContext } from './components'
 import { useNow, fmtDuration } from './ui'
@@ -18,17 +18,22 @@ const NAV: { id: Page; label: string; ico: string; soon?: boolean }[] = [
   { id: 'home', label: 'Главная', ico: '⌂' },
   { id: 'chat', label: 'Мультичат', ico: '💬' },
   { id: 'events', label: 'События', ico: '⚡' },
-  { id: 'alerts', label: 'Алерты', ico: '✦', soon: true },
+  { id: 'alerts', label: 'Алерты', ico: '✦' },
   { id: 'overlays', label: 'Оверлеи', ico: '▣' },
   { id: 'connections', label: 'Подключения', ico: '⏚' },
   { id: 'settings', label: 'Настройки', ico: '⚙' }
 ]
 
-const LATER = ['YouTube, VK, Kick', 'Донаты и алерты', 'Конструктор алертов', 'Аукцион и колесо', 'Автоматизации']
+const LATER = ['Конструктор алертов', 'Озвучка донатов', 'Аукцион и колесо', 'Автоматизации']
 
 export function App() {
   const [snap, setSnap] = useState<HubSnapshot | null>(null)
   const [page, setPage] = useState<Page>('home')
+  const [connSel, setConnSel] = useState<Platform | undefined>(undefined)
+  const go = (p: Page, sel?: Platform): void => {
+    setConnSel(sel)
+    setPage(p)
+  }
   const now = useNow()
 
   useEffect(() => {
@@ -55,7 +60,7 @@ export function App() {
             </div>
           </div>
           {NAV.map((n) => (
-            <button key={n.id} className={`nav ${page === n.id ? 'on' : ''}`} onClick={() => setPage(n.id)}>
+            <button key={n.id} className={`nav ${page === n.id ? 'on' : ''}`} onClick={() => go(n.id)}>
               <span className="ico">{n.ico}</span>
               {n.label}
               {n.soon && <span className="soon">скоро</span>}
@@ -89,13 +94,13 @@ export function App() {
             </div>
           </div>
 
-          {page === 'home' && <Home snap={snap} go={setPage} />}
+          {page === 'home' && <Home snap={snap} go={go} />}
           {page === 'chat' && <Chat snap={snap} />}
-          {page === 'connections' && <Connections snap={snap} />}
+          {page === 'connections' && <Connections key={connSel ?? ""} snap={snap} initial={connSel} />}
           {page === 'events' && <Events snap={snap} />}
           {page === 'overlays' && <Overlays snap={snap} />}
           {page === 'settings' && <Settings snap={snap} />}
-          {page === 'alerts' && <Soon title="Алерты" text="Очередь, шаблоны в темах «Общий» и «У костра», звуки, условия по сумме — этап донатов. Тестовый оверлей алертов уже есть в «Оверлеях»." />}
+          {page === 'alerts' && <Alerts snap={snap} />}
         </main>
       </div>
       {snap.settings.setupMode === null && <Wizard />}

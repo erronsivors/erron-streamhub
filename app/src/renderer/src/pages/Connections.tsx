@@ -2,15 +2,16 @@ import { useState } from 'react'
 import type { ConnStatus, HubSnapshot, Platform } from '../../../main/core/types'
 import { Hint, Toggle, errText } from '../components'
 import { PlatIcon, fmtTime, useNow } from '../ui'
+import { DonationPanel, isDonationService } from './DonationPanels'
 
 const STATE_LABEL: Record<ConnStatus['state'], string> = { off: 'Не подключено', connecting: 'Подключение…', ok: 'Подключено', error: 'Ошибка' }
-const STAGE: Partial<Record<Platform, string>> = {
-  donationalerts: 'этап 3', donatepay: 'этап 3', donatex: 'этап 3', boosty: 'этап 3'
+const HINT: Partial<Record<Platform, string>> = {
+  obs: 'obs', twitch: 'twitch', goodgame: 'goodgame', kick: 'kick', vk: 'vk', youtube: 'youtube',
+  donationalerts: 'donationalerts', donatepay: 'donatepay', donatex: 'donatex', boosty: 'boosty'
 }
-const HINT: Partial<Record<Platform, string>> = { obs: 'obs', twitch: 'twitch', goodgame: 'goodgame', kick: 'kick', vk: 'vk', youtube: 'youtube' }
 
-export function Connections({ snap }: { snap: HubSnapshot }) {
-  const [sel, setSel] = useState<Platform>('twitch')
+export function Connections({ snap, initial }: { snap: HubSnapshot; initial?: Platform }) {
+  const [sel, setSel] = useState<Platform>(initial ?? 'twitch')
   const cur = snap.connections.find((c) => c.id === sel) ?? snap.connections[0]
   const active = snap.connections.filter((c) => c.state === 'ok').length
 
@@ -32,7 +33,7 @@ export function Connections({ snap }: { snap: HubSnapshot }) {
                 <PlatIcon p={c.id} />
                 <div className="grow" style={{ minWidth: 0 }}>
                   <div className="name">{c.name}</div>
-                  <div className="small muted ellipsis">{c.state === 'off' && STAGE[c.id] ? `Появится: ${STAGE[c.id]}` : c.detail}</div>
+                  <div className="small muted ellipsis">{c.detail}</div>
                 </div>
                 <span className={`dot ${c.state}`} />
               </div>
@@ -47,9 +48,7 @@ export function Connections({ snap }: { snap: HubSnapshot }) {
           {cur.id === 'twitch' && <TwitchPanel snap={snap} />}
           {cur.id === 'youtube' && <YoutubePanel snap={snap} />}
           {(cur.id === 'goodgame' || cur.id === 'kick' || cur.id === 'vk') && <ChannelPanel key={cur.id} id={cur.id} snap={snap} />}
-          {cur.state === 'off' && STAGE[cur.id] && (
-            <div className="note">Подключение появится на {STAGE[cur.id]}. Вход — напрямую на площадке; токены шифруются Windows и не покидают ПК.</div>
-          )}
+          {isDonationService(cur.id) && <DonationPanel key={cur.id} id={cur.id} snap={snap} />}
           <h3 style={{ marginTop: 20 }}>Журнал</h3>
           <div className="log">
             {cur.log.length ? cur.log.map((l, i) => (

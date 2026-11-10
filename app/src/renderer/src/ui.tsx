@@ -43,6 +43,11 @@ export const PLATFORM: Record<Platform, { short: string; color: string }> = {
   hub: { short: 'H', color: '#9a3fd6' }
 }
 
+const PLATFORM_NAME: Partial<Record<Platform, string>> = {
+  twitch: 'Twitch', youtube: 'YouTube', vk: 'VK Видео Live', kick: 'Kick', goodgame: 'GoodGame',
+  donationalerts: 'DonationAlerts', donatepay: 'DonatePay', donatex: 'DonateX', boosty: 'Boosty'
+}
+
 export function PlatIcon({ p }: { p: Platform }) {
   const d = PLATFORM[p]
   return (
@@ -60,7 +65,7 @@ const TYPE_ICO: Record<HubEvent['type'], string> = {
   message: '💬', donation: '₽', follow: '♥', sub: '★', gift: '🎁', raid: '↗', bits: '◆', reward: '✦', system: 'i'
 }
 
-export function EventRow({ e, now }: { e: HubEvent; now: number }) {
+export function EventRow({ e, now, onReplay }: { e: HubEvent; now: number; onReplay?: () => void }) {
   const amount = e.type === 'donation' && e.amount ? ` · ${e.amount.toLocaleString('ru-RU')} ${e.currency === 'RUB' ? '₽' : e.currency ?? ''}` : ''
   return (
     <div className="row">
@@ -69,9 +74,10 @@ export function EventRow({ e, now }: { e: HubEvent; now: number }) {
         <b className="ellipsis">
           {e.user} · {TYPE_LABEL[e.type]}{amount} {e.test && <span className="tag test">ТЕСТ</span>}
         </b>
-        <span className="small muted ellipsis" style={{ display: 'block' }}>{e.text || e.platform}</span>
+        <span className="small muted ellipsis" style={{ display: 'block' }}>{e.text || PLATFORM_NAME[e.platform] || e.platform}</span>
       </div>
       <span className="small muted">{fmtAgo(e.ts, now)}</span>
+      {onReplay && <button className="btn sm" style={{ marginLeft: 8 }} title="Показать алерт ещё раз" onClick={onReplay}>↻</button>}
     </div>
   )
 }

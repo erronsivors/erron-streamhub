@@ -1,6 +1,9 @@
 // Общие типы ядра. Те же типы использует интерфейс (через preload).
 import type { AppSettings } from './settings'
 import type { ChatPlatformState } from './connector'
+import type { AlertQueueState } from './alerts'
+import type { DonationServiceState } from './donations/common'
+import type { SoundInfo } from './sounds'
 
 export type Platform = 'twitch' | 'youtube' | 'vk' | 'kick' | 'goodgame' | 'donationalerts' | 'donatepay' | 'donatex' | 'boosty' | 'obs' | 'hub'
 
@@ -28,6 +31,8 @@ export interface HubEvent {
   color?: string
   amount?: number
   currency?: string
+  /** Сумма в рублях (для статистики и условий алертов), если сервис её сообщает или валюта RUB. */
+  amountRub?: number
   /** Тестовое событие: показывается в оверлеях, но не идёт в статистику. */
   test?: boolean
 }
@@ -112,5 +117,8 @@ export interface HubSnapshot {
   twitch: TwitchState
   youtube: YoutubeState
   platforms: ChatPlatformState[]
+  alerts: AlertQueueState
+  donations: DonationServiceState[]
+  sounds: SoundInfo[]
   float: { open: boolean; editing: boolean; hotkey: string }
 }

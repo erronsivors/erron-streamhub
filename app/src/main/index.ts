@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, session, shell, clipboard, type IpcMainInvokeEvent } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, session, shell, clipboard, type IpcMainInvokeEvent } from 'electron'
 import { join } from 'node:path'
 import { Store } from './core/db'
 import { Secrets } from './core/secrets'
@@ -14,6 +14,16 @@ import { GoodGameConnector } from './core/goodgame'
 import { KickConnector } from './core/kick'
 import { VkConnector } from './core/vk'
 import { YoutubeConnector } from './core/youtube'
+import { AlertEngine } from './core/alerts'
+import { Stats } from './core/stats'
+import { SoundLibrary } from './core/sounds'
+import type { DonationConnector } from './core/donations/common'
+import { DonationAlertsConnector } from './core/donations/donationalerts'
+import { DonatePayConnector } from './core/donations/donatepay'
+import { DonateXConnector } from './core/donations/donatex'
+import { BoostyConnector } from './core/donations/boosty'
+import { clearSite, isSiteId, openSite } from './core/sitewindow'
+import type { StatsPeriod } from './core/settings'
 import type { HubEvent, HubSnapshot, Platform } from './core/types'
 
 // Один экземпляр приложения: второй запуск просто показывает окно.
@@ -32,11 +42,14 @@ let twitch: TwitchConnector
 let youtube: YoutubeConnector
 let floatChat: FloatChat
 const chats = new ChatRegistry()
-
-// Площадки следующих этапов — видны в «Подключениях» как «Не настроено».
-const PLANNED: [Platform, string][] = [
-  ['donationalerts', 'DonationAlerts'], ['donatepay', 'DonatePay'], ['donatex', 'DonateX'], ['boosty', 'Boosty']
-]
+let alerts: AlertEngine
+let stats: Stats
+let sounds: SoundLibrary
+let da: DonationAlertsConnector
+let dp: DonatePayConnector
+let dx: DonateXConnector
+let boosty: BoostyConnector
+let donations: DonationConnector[] = []
 
 function snapshot(): HubSnapshot {
   return {
@@ -51,6 +64,9 @@ function snapshot(): HubSnapshot {
     twitch: twitch.state(),
     youtube: youtube.state(),
     platforms: chats.states(),
+    alerts: alerts.state(),
+    donations: donations.map((d) => d.state()),
+    sounds: sounds.list(),
     float: { open: floatChat?.isOpen ?? false, editing: floatChat?.isEditing ?? false, hotkey: FLOAT_HOTKEY.replace('CommandOrControl', 'Ctrl') }
   }
 }
@@ -151,7 +167,16 @@ app.whenReady().then(async () => {
   goodgame.onChange = pushUpdate
   kick.onChange = pushUpdate
   vk.onChange = pushUpdate
-  for (const [id, name] of PLANNED) hub.register(id, name)
+  da = new DonationAlertsConnector(hub, settings, secrets, store)
+  dp = new DonatePayConnector(hub, secrets, store)
+  dx = new DonateXConnector(hub, settings, secrets, store)
+  boosty = new BoostyConnector(hub, settings, secrets, store)
+  donations = [da, dp, dx, boosty]
+  for (const d of donations) d.onChange = pushUpdate
+  alerts = new AlertEngine(hub, settings)
+  alerts.on('change', pushUpdate)
+  stats = new Stats(store, () => (obs.state.streaming ? obs.state.streamStartedAt : null))
+  sounds = new SoundLibrary(app.getPath('userData'), store)
   hub.seed(store.recentEvents(100))
   if (!secrets.available()) hub.log('hub', 'error', 'Шифрование Windows недоступно — токены сохранять нельзя')
 
@@ -165,7 +190,7 @@ app.whenReady().then(async () => {
   server = new OverlayServer(hub, store, settings, images, resourcesDir, app.getAppPath(), {
     send: (text) => chats.send(text, chats.states().filter((p) => p.canSend).map((p) => p.id), 'broadcaster'),
     pin: (id) => hub.togglePin(id)
-  })
+  }, { alerts, stats, sounds })
   obs.onChange = pushUpdate
   floatChat = new FloatChat(settings, hub, () => server.overlayUrl('float'))
   floatChat.onChange = pushUpdate
@@ -180,6 +205,9 @@ app.whenReady().then(async () => {
     if (s.kick.channel !== prev.kick.channel) void kick.restart()
     if (s.youtube.customClientId !== prev.youtube.customClientId) void youtube.logout()
     if (s.vk.channel !== prev.vk.channel) void vk.restart()
+    if (s.donationalerts.customClientId !== prev.donationalerts.customClientId) void da.logout()
+    if (s.donatex.customClientId !== prev.donatex.customClientId && dx.state().method === 'oauth') void dx.logout()
+    if (s.boosty.poll !== prev.boosty.poll) void boosty.restart()
     if (s.twitch.customClientId !== prev.twitch.customClientId || s.twitch.thirdPartyEmotes !== prev.twitch.thirdPartyEmotes) void twitch.restart()
     prev = s
     pushUpdate()
@@ -197,23 +225,64 @@ app.whenReady().then(async () => {
   handle('hub:copy', (text) => clipboard.writeText(str(text, 2000)))
   handle('hub:openExternal', (url) => {
     const u = str(url, 300)
-    if (/^https:\/\/(dev\.twitch\.tv|www\.twitch\.tv|obsproject\.com|github\.com|console\.cloud\.google\.com)\//.test(u)) void shell.openExternal(u)
+    if (/^https:\/\/(dev\.twitch\.tv|www\.twitch\.tv|obsproject\.com|github\.com|console\.cloud\.google\.com|www\.donationalerts\.com|donatepay\.ru|donatex\.gg|boosty\.to)\//.test(u)) void shell.openExternal(u)
   })
   handle('hub:testEvent', (kind) => {
     const samples: Record<string, Omit<HubEvent, 'id' | 'ts'>> = {
       donation: { platform: 'donationalerts', type: 'donation', user: 'Тестовый зритель', amount: 500, currency: 'RUB', text: 'Привет со стрима! 🔥', test: true },
       sub: { platform: 'twitch', type: 'sub', user: 'night_raven', text: '3 мес. вместе', test: true },
       follow: { platform: 'twitch', type: 'follow', user: 'pixel_fox', test: true },
-      raid: { platform: 'twitch', type: 'raid', user: 'kostya_play', amount: 42, text: '42 зрителя', test: true },
+      raid: { platform: 'twitch', type: 'raid', user: 'kostya_play', amount: 42, test: true },
+      bigdonation: { platform: 'donatex', type: 'donation', user: 'Щедрый гость', amount: 5000, currency: 'RUB', text: 'Это на новый микрофон!', test: true },
+      gift: { platform: 'twitch', type: 'gift', user: 'santa_claws', amount: 5, test: true },
+      bits: { platform: 'twitch', type: 'bits', user: 'bit_master', amount: 300, text: 'Держи биты!', test: true },
+      reward: { platform: 'twitch', type: 'reward', user: 'lucky_cat', text: 'Спой песню', test: true },
+      boosty: { platform: 'boosty', type: 'sub', user: 'Верный подписчик', amount: 300, currency: 'RUB', text: 'Уровень «Костёр»', test: true },
       message: { platform: 'twitch', type: 'message', user: 'test_viewer', userId: 'test', text: 'Тестовое сообщение: всем привет у костра! 🔥', parts: [{ t: 'text', v: 'Тестовое сообщение: всем привет у костра! 🔥' }], color: '#ffb27a', test: true }
     }
     const s = samples[String(kind)]
     if (s) hub.push(s)
   })
+  // ---------- Алерты, статистика, звуки ----------
+  handle('hub:alertPause', (v) => alerts.setPaused(v === true))
+  handle('hub:alertSkip', () => alerts.skip())
+  handle('hub:alertStopAll', () => alerts.stopAll())
+  handle('hub:alertRemove', (id) => alerts.remove(str(id, 100)))
+  handle('hub:alertReplay', (id) => alerts.replay(str(id, 100)))
+  handle('hub:stats', (period) => {
+    const p = (['stream', 'today', 'week', 'month', 'all'] as StatsPeriod[]).includes(period as StatsPeriod) ? (period as StatsPeriod) : 'stream'
+    return stats.snapshot(p)
+  })
+  handle('hub:soundAdd', async () => {
+    if (!win) return null
+    const r = await dialog.showOpenDialog(win, { title: 'Звук для алерта', properties: ['openFile'], filters: [{ name: 'Звук', extensions: ['mp3', 'wav', 'ogg'] }] })
+    if (r.canceled || !r.filePaths[0]) return null
+    const info = sounds.add(r.filePaths[0])
+    pushUpdate()
+    return info
+  })
+  handle('hub:soundRemove', (id) => {
+    sounds.remove(str(id, 100))
+    pushUpdate()
+  })
+  // ---------- Сервисы донатов ----------
+  handle('hub:daLogin', () => da.login())
+  handle('hub:daCancel', () => da.cancelLogin())
+  handle('hub:dpKey', (key) => dp.setKey(str(key, 300)))
+  handle('hub:dxLogin', () => dx.login())
+  handle('hub:dxCancel', () => dx.cancelLogin())
+  handle('hub:dxToken', (t) => dx.setToken(str(t, 4000)))
+  handle('hub:boostyLogin', () => boosty.login())
+  handle('hub:boostyCancel', () => boosty.cancelLogin())
+  handle('hub:openSite', (id) => { if (isSiteId(id)) openSite(id) })
+  handle('hub:clearSite', (id) => (isSiteId(id) ? clearSite(id) : undefined))
+  handle('hub:donationLogout', (p) => donations.find((d) => d.id === p)?.logout())
   handle('hub:floatEdit', () => floatChat.toggleEdit())
   handle('hub:floatReset', () => floatChat.reset())
   handle('hub:reconnect', (p) => {
     if (p === 'obs') return obs.reconnect()
+    const d = donations.find((x) => x.id === p)
+    if (d) return d.restart()
     return chats.get(p as Platform)?.restart()
   })
   handle('hub:twitchLogin', (r) => twitch.login(role(r)))
@@ -250,6 +319,7 @@ app.whenReady().then(async () => {
   }
   await obs.start()
   void chats.startAll()
+  for (const d of donations) void d.start().catch(() => undefined)
   floatChat.apply()
   pushUpdate()
 })
@@ -258,6 +328,8 @@ app.on('window-all-closed', () => app.quit())
 app.on('before-quit', () => {
   floatChat?.close()
   chats.stopAll()
+  for (const d of donations) d.stop()
+  alerts?.dispose()
   void obs?.stop()
   void server?.stop()
   store?.close()

@@ -1,7 +1,7 @@
 import Fastify, { type FastifyInstance, type FastifyRequest } from 'fastify'
 import websocket, { type WebSocket } from '@fastify/websocket'
-import { randomBytes, timingSafeEqual } from 'node:crypto'
-import { readFile } from 'node:fs/promises'
+import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
+import { readFile, readdir } from 'node:fs/promises'
 import { networkInterfaces } from 'node:os'
 import { join } from 'node:path'
 import type { Hub } from './hub'
@@ -9,6 +9,9 @@ import type { Store } from './db'
 import type { Settings } from './settings'
 import type { ImageCache } from './imgcache'
 import type { HubEvent, ServerInfo } from './types'
+import type { AlertEngine, AlertItem } from './alerts'
+import type { Stats } from './stats'
+import type { SoundLibrary } from './sounds'
 
 /** Оверлеи для OBS. id = имя файла в resources/overlays, key = ключ настроек. */
 const OVERLAYS = [
@@ -16,6 +19,8 @@ const OVERLAYS = [
   { id: 'chat', key: 'chat', name: 'Чат вертикальный', size: '500 × 900' },
   { id: 'chat-h', key: 'chatH', name: 'Чат горизонтальный', size: '1920 × 80' },
   { id: 'pinned', key: 'pinned', name: 'Закреплённое сообщение', size: '1200 × 300' },
+  { id: 'top', key: 'top', name: 'Топ донатеров', size: '500 × 400' },
+  { id: 'last', key: 'last', name: 'Последний донат', size: '800 × 140' },
   // Окно «чат поверх игры» — открывается самим Crossember, в списке для OBS не показывается.
   { id: 'float', key: 'float', name: 'Чат поверх игры', size: '', hidden: true }
 ] as { id: string; key: string; name: string; size: string; hidden?: boolean }[]
@@ -27,7 +32,10 @@ const ASSETS: Record<string, string> = {
   'alert.js': 'text/javascript; charset=utf-8',
   'chat.js': 'text/javascript; charset=utf-8',
   'pinned.js': 'text/javascript; charset=utf-8',
-  'remote.js': 'text/javascript; charset=utf-8'
+  'remote.js': 'text/javascript; charset=utf-8',
+  'top.js': 'text/javascript; charset=utf-8',
+  'last.js': 'text/javascript; charset=utf-8',
+  'sounds.js': 'text/javascript; charset=utf-8'
 }
 
 /** Шрифты — только этот список файлов, никаких произвольных путей. */
@@ -72,6 +80,13 @@ export function lanAddresses(): string[] {
   return out
 }
 
+/** Движок алертов, статистика и звуки (этап 3). */
+export interface OverlayExtras {
+  alerts: AlertEngine
+  stats: Stats
+  sounds: SoundLibrary
+}
+
 export interface RemoteActions {
   send: (text: string) => Promise<void>
   pin: (id: string | null) => void
@@ -93,6 +108,8 @@ export class OverlayServer {
   private remoteKey: string
   private lanError: string | null = null
   private lanUrl: string | null = null
+  /** Отпечаток файлов оверлеев: изменился (новая версия Crossember) — открытые оверлеи перезагрузятся сами. */
+  private overlayBuild = ''
   port: number
 
   constructor(
@@ -102,7 +119,8 @@ export class OverlayServer {
     private images: ImageCache,
     private resourcesDir: string,
     private appDir: string,
-    private actions: RemoteActions
+    private actions: RemoteActions,
+    private extras: OverlayExtras
   ) {
     this.port = store.get('server.port', 47832)
     this.overlayKey = store.get('server.overlayKey', '') || this.rotate('overlay')
@@ -110,6 +128,22 @@ export class OverlayServer {
     hub.on('event', (e: HubEvent) => this.broadcast({ kind: 'event', event: e }))
     hub.on('delete', (d: unknown) => this.broadcast({ kind: 'delete', ...(d as object) }))
     hub.on('pinned', (m: HubEvent | null) => this.broadcast({ kind: 'pinned', event: m }))
+    // Алерты идут только в оверлеи (local), пульту второго ПК они не нужны.
+    extras.alerts.on('play', (a: AlertItem) => this.broadcast({ kind: 'alert', alert: a }, 'local'))
+    extras.alerts.on('end', (id: string) => this.broadcast({ kind: 'alert-end', id }, 'local'))
+    hub.on('event', (e: HubEvent) => {
+      if (e.type !== 'message' && e.type !== 'system' && !e.test) this.pushStats()
+    })
+  }
+
+  private statsData(): unknown {
+    const t = this.settings.get().overlays.top
+    return this.extras.stats.overlay(t.period, t.count)
+  }
+
+  /** Обновить оверлеи «Топ донатеров» и «Последний донат». */
+  pushStats(): void {
+    this.broadcast({ kind: 'stats', stats: this.statsData() }, 'local')
   }
 
   rotate(which: 'overlay' | 'remote'): string {
@@ -126,6 +160,7 @@ export class OverlayServer {
   pushConfig(): void {
     const s = this.settings.get()
     this.broadcast({ kind: 'config', overlays: { ...s.overlays, float: s.float } })
+    this.pushStats()
   }
 
   info(): ServerInfo {
@@ -138,20 +173,22 @@ export class OverlayServer {
     }
   }
 
-  private broadcast(msg: unknown): void {
+  private broadcast(msg: unknown, only?: Kind): void {
     const data = JSON.stringify(msg)
-    for (const s of this.sockets.keys()) if (s.readyState === s.OPEN) s.send(data)
+    for (const [s, kind] of this.sockets) if ((!only || kind === only) && s.readyState === s.OPEN) s.send(data)
   }
 
   private hello(kind: Kind): string {
     const s = this.settings.get()
     return JSON.stringify({
       kind: 'hello',
+      build: this.overlayBuild,
       role: kind === 'lan' ? 'remote' : 'overlay',
       overlays: { ...s.overlays, float: s.float },
       chat: this.hub.recentChat().slice(0, 50),
       events: kind === 'lan' ? this.hub.recent().slice(0, 30) : [],
-      pinned: this.hub.pinned
+      pinned: this.hub.pinned,
+      ...(kind === 'local' ? { stats: this.statsData() } : {})
     })
   }
 
@@ -197,6 +234,16 @@ export class OverlayServer {
       return reply.header('Cache-Control', 'public, max-age=604800, immutable').header('Cross-Origin-Resource-Policy', 'cross-origin').type(img.type).send(img.body)
     })
 
+    // Свои звуки алертов — только для оверлеев, с ключом.
+    if (kind === 'local') {
+      app.get<{ Params: { file: string }; Querystring: { k?: string } }>('/s/:file', async (req, reply) => {
+        if (!sameKey(req.query.k, key())) return reply.code(403).send({ error: 'forbidden' })
+        const snd = await this.extras.sounds.get(req.params.file)
+        if (!snd) return reply.code(404).send({ error: 'not found' })
+        return reply.type(snd.type).send(snd.body)
+      })
+    }
+
     app.get<{ Params: { file: string } }>('/f/:file', async (req, reply) => {
       const rel = FONTS[req.params.file]
       if (!rel) return reply.code(404).send({ error: 'not found' })
@@ -241,6 +288,14 @@ export class OverlayServer {
   }
 
   async start(): Promise<void> {
+    try {
+      const dir = join(this.resourcesDir, 'overlays')
+      const h = createHash('md5')
+      for (const f of (await readdir(dir)).sort()) h.update(f).update(await readFile(join(dir, f)))
+      this.overlayBuild = h.digest('hex').slice(0, 12)
+    } catch {
+      this.overlayBuild = String(Date.now())
+    }
     this.local = await this.build('local', '127.0.0.1', this.port)
     this.hub.setStatus('hub', 'ok', `Сервер оверлеев: 127.0.0.1:${this.port}`)
     await this.applyLan()
