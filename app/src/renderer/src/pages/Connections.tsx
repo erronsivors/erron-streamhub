@@ -5,10 +5,9 @@ import { PlatIcon, fmtTime, useNow } from '../ui'
 
 const STATE_LABEL: Record<ConnStatus['state'], string> = { off: 'Не подключено', connecting: 'Подключение…', ok: 'Подключено', error: 'Ошибка' }
 const STAGE: Partial<Record<Platform, string>> = {
-  youtube: 'этап 2', vk: 'этап 2',
   donationalerts: 'этап 3', donatepay: 'этап 3', donatex: 'этап 3', boosty: 'этап 3'
 }
-const HINT: Partial<Record<Platform, string>> = { obs: 'obs', twitch: 'twitch', goodgame: 'goodgame', kick: 'kick' }
+const HINT: Partial<Record<Platform, string>> = { obs: 'obs', twitch: 'twitch', goodgame: 'goodgame', kick: 'kick', vk: 'vk', youtube: 'youtube' }
 
 export function Connections({ snap }: { snap: HubSnapshot }) {
   const [sel, setSel] = useState<Platform>('twitch')
@@ -46,7 +45,8 @@ export function Connections({ snap }: { snap: HubSnapshot }) {
           <p className="muted" style={{ marginTop: 0 }}>{STATE_LABEL[cur.state]} · {cur.detail}</p>
           {cur.id === 'obs' && <ObsForm snap={snap} />}
           {cur.id === 'twitch' && <TwitchPanel snap={snap} />}
-          {(cur.id === 'goodgame' || cur.id === 'kick') && <ChannelPanel key={cur.id} id={cur.id} snap={snap} />}
+          {cur.id === 'youtube' && <YoutubePanel snap={snap} />}
+          {(cur.id === 'goodgame' || cur.id === 'kick' || cur.id === 'vk') && <ChannelPanel key={cur.id} id={cur.id} snap={snap} />}
           {cur.state === 'off' && STAGE[cur.id] && (
             <div className="note">Подключение появится на {STAGE[cur.id]}. Вход — напрямую на площадке; токены шифруются Windows и не покидают ПК.</div>
           )}
@@ -148,6 +148,70 @@ function TwitchPanel({ snap }: { snap: HubSnapshot }) {
   )
 }
 
+function YoutubePanel({ snap }: { snap: HubSnapshot }) {
+  const y = snap.youtube
+  const [err, setErr] = useState<string | null>(null)
+  const [advanced, setAdvanced] = useState(false)
+  const [clientId, setClientId] = useState(snap.settings.youtube.customClientId)
+  const [secret, setSecret] = useState('')
+
+  const saveCustom = async (): Promise<void> => {
+    setErr(null)
+    try {
+      if (secret) await window.hub.youtubeSecret(secret)
+      await window.hub.setSettings({ youtube: { customClientId: clientId } })
+      setSecret('')
+    } catch (e) {
+      setErr(errText(e))
+    }
+  }
+
+  return (
+    <div>
+      {y.clientIdSource === 'none' && (
+        <div className="note warnbox" style={{ marginBottom: 12 }}>
+          В этой сборке ещё нет общего входа Google. Укажите свой Client ID ниже («Для опытных») — инструкция в подсказке «!».
+        </div>
+      )}
+      {y.pending && (
+        <div className="note" style={{ marginBottom: 12 }}>
+          <b>Подтвердите вход в Google</b>
+          <p style={{ margin: '8px 0' }}>Страница Google открылась в браузере на этом ПК. Выберите аккаунт с YouTube-каналом и разрешите доступ.</p>
+          <button className="btn sm" onClick={() => void window.hub.youtubeCancel()}>Отмена</button>
+        </div>
+      )}
+      <div className="row">
+        <div className="grow">
+          <b>Канал YouTube</b>
+          <span className="small muted" style={{ display: 'block' }}>{y.account ? `${y.account.name} · ${y.live ? `в эфире, зрителей: ${y.viewers ?? 0}` : 'ждём эфир'}` : 'Не подключён'}</span>
+        </div>
+        {y.account
+          ? <button className="btn sm" onClick={() => void window.hub.youtubeLogout()}>Выйти</button>
+          : <button className="btn primary sm" disabled={y.pending || y.clientIdSource === 'none'} onClick={() => { setErr(null); window.hub.youtubeLogin().catch((e) => setErr(errText(e))) }}>Войти</button>}
+      </div>
+      <div style={{ display: 'flex', gap: 10, marginTop: 12, flexWrap: 'wrap' }}>
+        {y.account && <button className="btn sm" onClick={() => void window.hub.reconnect('youtube')}>Переподключить</button>}
+        <button className="btn sm" onClick={() => setAdvanced(!advanced)}>{advanced ? 'Скрыть' : 'Для опытных'}</button>
+      </div>
+      {advanced && (
+        <div style={{ marginTop: 12 }}>
+          <div className="field">
+            <label>Свой Client ID Google <Hint id="youtubeClientId" /></label>
+            <input className="input mono" value={clientId} onChange={(e) => setClientId(e.target.value.trim())} placeholder="пусто — общее приложение Crossember" spellCheck={false} />
+          </div>
+          <div className="field">
+            <label>Client secret {y.hasCustomSecret ? '(сохранён и зашифрован — введите новый, чтобы заменить)' : ''}</label>
+            <input className="input mono" type="password" value={secret} onChange={(e) => setSecret(e.target.value.trim())} placeholder="GOCSPX-…" spellCheck={false} />
+          </div>
+          <button className="btn sm" onClick={() => void saveCustom()}>Сохранить</button>
+          <span className="small muted" style={{ display: 'block', marginTop: 6 }}>Сейчас: {y.clientIdSource === 'custom' ? 'свой Client ID' : y.clientIdSource === 'shared' ? 'общее приложение Crossember' : 'не задан'}. После смены Client ID нужно войти заново.</span>
+        </div>
+      )}
+      {err && <p className="small" style={{ color: '#ff7a84' }}>{err}</p>}
+    </div>
+  )
+}
+
 function ObsForm({ snap }: { snap: HubSnapshot }) {
   const [url, setUrl] = useState(snap.obsConfig.url)
   const [pass, setPass] = useState('')
@@ -189,11 +253,11 @@ function ObsForm({ snap }: { snap: HubSnapshot }) {
 }
 
 /** Площадки, которые читаются без входа: достаточно ника канала. */
-function ChannelPanel({ id, snap }: { id: 'goodgame' | 'kick'; snap: HubSnapshot }) {
+function ChannelPanel({ id, snap }: { id: 'goodgame' | 'kick' | 'vk'; snap: HubSnapshot }) {
   const saved = snap.settings[id].channel
   const [nick, setNick] = useState(saved)
   const p = snap.platforms.find((x) => x.id === id)
-  const site = id === 'goodgame' ? 'goodgame.ru/ник' : 'kick.com/ник'
+  const site = id === 'goodgame' ? 'goodgame.ru/ник' : id === 'kick' ? 'kick.com/ник' : 'live.vkvideo.ru/ник'
   return (
     <div>
       <div className="field">

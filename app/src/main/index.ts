@@ -12,6 +12,8 @@ import { FloatChat, FLOAT_HOTKEY } from './core/floatchat'
 import { ChatRegistry } from './core/connector'
 import { GoodGameConnector } from './core/goodgame'
 import { KickConnector } from './core/kick'
+import { VkConnector } from './core/vk'
+import { YoutubeConnector } from './core/youtube'
 import type { HubEvent, HubSnapshot, Platform } from './core/types'
 
 // Один экземпляр приложения: второй запуск просто показывает окно.
@@ -27,12 +29,12 @@ let hub: Hub
 let server: OverlayServer
 let obs: ObsConnector
 let twitch: TwitchConnector
+let youtube: YoutubeConnector
 let floatChat: FloatChat
 const chats = new ChatRegistry()
 
 // Площадки следующих этапов — видны в «Подключениях» как «Не настроено».
 const PLANNED: [Platform, string][] = [
-  ['youtube', 'YouTube'], ['vk', 'VK Видео Live'],
   ['donationalerts', 'DonationAlerts'], ['donatepay', 'DonatePay'], ['donatex', 'DonateX'], ['boosty', 'Boosty']
 ]
 
@@ -47,6 +49,7 @@ function snapshot(): HubSnapshot {
     obsConfig: obs.config(),
     settings: settings.get(),
     twitch: twitch.state(),
+    youtube: youtube.state(),
     platforms: chats.states(),
     float: { open: floatChat?.isOpen ?? false, editing: floatChat?.isEditing ?? false, hotkey: FLOAT_HOTKEY.replace('CommandOrControl', 'Ctrl') }
   }
@@ -136,12 +139,18 @@ app.whenReady().then(async () => {
   images.preconnect()
   twitch = new TwitchConnector(hub, settings, secrets, images)
   chats.add(twitch)
+  youtube = new YoutubeConnector(hub, settings, secrets, resourcesDir)
+  chats.add(youtube)
+  youtube.onChange = pushUpdate
   const goodgame = new GoodGameConnector(hub, settings, images, join(app.getPath('userData'), 'cache'))
   const kick = new KickConnector(hub, settings, images)
+  const vk = new VkConnector(hub, settings, images)
   chats.add(goodgame)
   chats.add(kick)
+  chats.add(vk)
   goodgame.onChange = pushUpdate
   kick.onChange = pushUpdate
+  vk.onChange = pushUpdate
   for (const [id, name] of PLANNED) hub.register(id, name)
   hub.seed(store.recentEvents(100))
   if (!secrets.available()) hub.log('hub', 'error', 'Шифрование Windows недоступно — токены сохранять нельзя')
@@ -169,6 +178,8 @@ app.whenReady().then(async () => {
     floatChat.apply()
     if (s.goodgame.channel !== prev.goodgame.channel) void goodgame.restart()
     if (s.kick.channel !== prev.kick.channel) void kick.restart()
+    if (s.youtube.customClientId !== prev.youtube.customClientId) void youtube.logout()
+    if (s.vk.channel !== prev.vk.channel) void vk.restart()
     if (s.twitch.customClientId !== prev.twitch.customClientId || s.twitch.thirdPartyEmotes !== prev.twitch.thirdPartyEmotes) void twitch.restart()
     prev = s
     pushUpdate()
@@ -186,7 +197,7 @@ app.whenReady().then(async () => {
   handle('hub:copy', (text) => clipboard.writeText(str(text, 2000)))
   handle('hub:openExternal', (url) => {
     const u = str(url, 300)
-    if (/^https:\/\/(dev\.twitch\.tv|www\.twitch\.tv|obsproject\.com|github\.com)\//.test(u)) void shell.openExternal(u)
+    if (/^https:\/\/(dev\.twitch\.tv|www\.twitch\.tv|obsproject\.com|github\.com|console\.cloud\.google\.com)\//.test(u)) void shell.openExternal(u)
   })
   handle('hub:testEvent', (kind) => {
     const samples: Record<string, Omit<HubEvent, 'id' | 'ts'>> = {
@@ -209,6 +220,10 @@ app.whenReady().then(async () => {
   handle('hub:twitchCancel', () => twitch.cancelLogin())
   handle('hub:twitchLogout', (r) => twitch.logout(role(r)))
   handle('hub:twitchRestart', () => twitch.restart())
+  handle('hub:youtubeLogin', () => youtube.login())
+  handle('hub:youtubeCancel', () => youtube.cancelLogin())
+  handle('hub:youtubeLogout', () => youtube.logout())
+  handle('hub:youtubeSecret', (v) => youtube.setCustomSecret(typeof v === 'string' ? str(v, 200) : null))
   handle('hub:chatSend', (text, as, targets) => {
     const list = Array.isArray(targets) ? (targets.filter((t) => typeof t === 'string') as Platform[]) : []
     return chats.send(str(text), list, role(as))

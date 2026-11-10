@@ -38,6 +38,8 @@ export interface AppSettings {
     /** От чьего имени пишут автоматические сообщения. */
     autoSendAs: 'broadcaster' | 'bot'
   }
+  /** Свой OAuth-клиент Google (режим «Для опытных»); secret хранится зашифрованным отдельно. */
+  youtube: { customClientId: string }
   /** Ник канала для площадок, которые читаются без входа. */
   goodgame: { channel: string }
   kick: { channel: string }
@@ -70,6 +72,7 @@ export const DEFAULTS: AppSettings = {
   setupMode: null,
   defaultTheme: 'general',
   twitch: { customClientId: '', thirdPartyEmotes: true, autoSendAs: 'broadcaster' },
+  youtube: { customClientId: '' },
   goodgame: { channel: '' },
   kick: { channel: '' },
   vk: { channel: '' },
@@ -92,6 +95,12 @@ const nick = (v: unknown, d: string): string => {
   if (typeof v !== 'string') return d
   const t = v.trim().replace(/^https?:\/\/[^/]+\//, '').replace(/[/?#].*$/, '').replace(/^@/, '')
   return /^[A-Za-z0-9_.-]{0,40}$/.test(t) ? t : d
+}
+/** Client ID Google: вида 123-abc.apps.googleusercontent.com или пусто. */
+const ytId = (v: unknown, d: string): string => {
+  if (typeof v !== 'string') return d
+  const t = v.trim()
+  return t === '' || /^[\w-]{1,100}\.apps\.googleusercontent\.com$/.test(t) ? t : d
 }
 const obj = (v: unknown): Record<string, unknown> => (v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : {})
 
@@ -134,6 +143,7 @@ export function sanitize(input: unknown, base: AppSettings = DEFAULTS): AppSetti
       thirdPartyEmotes: bool(tw.thirdPartyEmotes, base.twitch.thirdPartyEmotes),
       autoSendAs: tw.autoSendAs === 'bot' || tw.autoSendAs === 'broadcaster' ? tw.autoSendAs : base.twitch.autoSendAs
     },
+    youtube: { customClientId: ytId(obj(i.youtube).customClientId, base.youtube?.customClientId ?? '') },
     goodgame: { channel: nick(obj(i.goodgame).channel, base.goodgame?.channel ?? '') },
     kick: { channel: nick(obj(i.kick).channel, base.kick?.channel ?? '') },
     vk: { channel: nick(obj(i.vk).channel, base.vk?.channel ?? '') },

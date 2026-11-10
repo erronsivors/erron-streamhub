@@ -90,6 +90,16 @@ export interface TwitchState {
   emotes: { twitch: boolean; thirdParty: number }
 }
 
+/** Состояние входа YouTube для интерфейса (без токенов). */
+export interface YoutubeState {
+  clientIdSource: 'shared' | 'custom' | 'none'
+  hasCustomSecret: boolean
+  account: { id: string; name: string } | null
+  pending: boolean
+  live: boolean
+  viewers: number | null
+}
+
 export interface HubSnapshot {
   connections: ConnStatus[]
   obs: ObsState
@@ -100,6 +110,7 @@ export interface HubSnapshot {
   obsConfig: { url: string; hasPassword: boolean }
   settings: AppSettings
   twitch: TwitchState
+  youtube: YoutubeState
   platforms: ChatPlatformState[]
   float: { open: boolean; editing: boolean; hotkey: string }
 }
