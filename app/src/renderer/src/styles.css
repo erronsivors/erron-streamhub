@@ -46,7 +46,7 @@ button, input, select { font: inherit; color: inherit; }
 .brand { display: flex; align-items: center; gap: 12px; padding: 0 8px 22px; }
 .brand img { width: 34px; height: 42px; }
 .brand b { font: 800 17px/1 var(--f-display); letter-spacing: .04em; display: block; }
-.brand small { font: 600 10px var(--f-mono); color: var(--muted); letter-spacing: .2em; }
+.brand small { display: block; margin-top: 5px; font: 500 11.5px/1 var(--f-text); color: var(--muted-2); letter-spacing: .01em; white-space: nowrap; }
 .nav { display: flex; align-items: center; gap: 12px; padding: 11px 14px; border-radius: 12px; border: 1px solid transparent;
        background: none; text-align: left; cursor: pointer; color: var(--ink-2); font-weight: 600; }
 .nav:hover { background: var(--coal); }
@@ -90,7 +90,8 @@ button, input, select { font: inherit; color: inherit; }
 .btn { display: inline-flex; align-items: center; gap: 8px; padding: 10px 16px; border-radius: 12px; border: 1px solid var(--line-2);
        background: var(--coal-2); cursor: pointer; font-weight: 700; color: var(--ink); }
 .btn:hover { border-color: var(--muted-2); }
-.btn.primary { background: var(--grad); border: none; color: #fff; box-shadow: 0 0 22px #ff2d3c44; }
+.btn.primary { background: var(--ink); border-color: var(--ink); color: #1a1311; font-weight: 700; }
+.btn.primary:hover { background: #fff; border-color: #fff; }
 .btn.sm { padding: 6px 12px; font-size: 13px; border-radius: 10px; }
 .btn:disabled { opacity: .5; cursor: default; }
 
@@ -119,7 +120,8 @@ button, input, select { font: inherit; color: inherit; }
 .plat { width: 38px; height: 38px; border-radius: 10px; display: grid; place-items: center; font: 800 14px var(--f-display); color: #fff; flex: none; }
 .conn .name { font: 700 15px var(--f-display); }
 
-.field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
+.field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; min-width: 0; }
+.field > .input, .numrow .input { min-width: 0; }
 .field label { font-size: 12px; color: var(--muted); letter-spacing: .04em; }
 .input { background: var(--night); border: 1px solid var(--line-2); border-radius: 10px; padding: 10px 12px; outline: none; user-select: text; }
 .input:focus { border-color: var(--mix); }
@@ -197,7 +199,7 @@ select.input { cursor: pointer; }
 .cact .danger { color: #ff7a84; font-weight: 700; }
 .chatinput { display: flex; gap: 8px; padding: 10px 12px; border-top: 1px solid var(--line); }
 .chatinput .input:first-child { flex: 1; }
-.brand small { letter-spacing: .08em; font-size: 9px; }
+.brand small { font-size: 11px; }
 
 /* Место под смайл резервируется сразу — строка не прыгает, пока картинка грузится */
 .emote, .ctext .emote { min-width: 26px; }

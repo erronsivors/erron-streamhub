@@ -3,6 +3,11 @@ import type { HubSnapshot } from '../main/core/types'
 import type { StatsSnapshot } from '../main/core/stats'
 import type { SoundInfo } from '../main/core/sounds'
 import type { AppSettings } from '../main/core/settings'
+import type { MediaInfo } from '../main/core/media'
+import type { AlertTemplate, ObsAction } from '../main/core/templates'
+import type { Rule } from '../main/core/rules'
+import type { ObsCatalog } from '../main/core/obs'
+import type { TtsVoice } from '../main/core/tts'
 
 type DeepPartial<T> = { [K in keyof T]?: T[K] extends object ? DeepPartial<T[K]> : T[K] }
 type Role = 'broadcaster' | 'bot'
@@ -26,6 +31,23 @@ const api = {
   stats: (period: string) => call<StatsSnapshot>('hub:stats', period),
   soundAdd: () => call<SoundInfo | null>('hub:soundAdd'),
   soundRemove: (id: string) => call('hub:soundRemove', id),
+  rulePut: (r: Rule) => call<Rule>('hub:rulePut', r),
+  ruleRemove: (id: string) => call('hub:ruleRemove', id),
+  ruleMove: (id: string, dir: -1 | 1) => call('hub:ruleMove', id, dir),
+  ruleTest: (id: string, kind: string) => call<boolean>('hub:ruleTest', id, kind),
+  rulesFlags: (p: { enabled?: boolean; dryRun?: boolean }) => call('hub:rulesFlags', p),
+  rulesClearLog: () => call('hub:rulesClearLog'),
+  templatePut: (t: AlertTemplate) => call<AlertTemplate>('hub:templatePut', t),
+  templateRemove: (id: string) => call('hub:templateRemove', id),
+  templateDuplicate: (id: string) => call<AlertTemplate | null>('hub:templateDuplicate', id),
+  templateTest: (t: AlertTemplate, kind: string) => call('hub:templateTest', t, kind),
+  mediaAdd: () => call<MediaInfo | null>('hub:mediaAdd'),
+  mediaRemove: (id: string) => call('hub:mediaRemove', id),
+  openOverlay: (id: string) => call('hub:openOverlay', id),
+  obsCatalog: () => call<ObsCatalog>('hub:obsCatalog'),
+  obsTest: (a: ObsAction) => call('hub:obsTest', a),
+  ttsVoices: () => call<TtsVoice[]>('hub:ttsVoices'),
+  ttsTest: (text: string) => call<string>('hub:ttsTest', text),
   daLogin: () => call('hub:daLogin'),
   daCancel: () => call('hub:daCancel'),
   dpKey: (key: string) => call('hub:dpKey', key),

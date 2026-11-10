@@ -1,7 +1,9 @@
 import { useState } from 'react'
 import type { HubSnapshot } from '../../../main/core/types'
 import { Hint, NumberField, ThemePicker, Toggle } from '../components'
-import type { FloatChatSettings } from '../../../main/core/settings'
+import type { FloatChatSettings, TtsSettings } from '../../../main/core/settings'
+import { VoiceSelect, previewTts } from '../editors'
+import { errText } from '../components'
 
 export function Settings({ snap }: { snap: HubSnapshot }) {
   const s = snap.settings
@@ -38,6 +40,7 @@ export function Settings({ snap }: { snap: HubSnapshot }) {
         </div>
 
         <FloatCard snap={snap} />
+        <TtsCard snap={snap} />
 
         {(
           <div className="card">
@@ -143,6 +146,40 @@ function FloatCard({ snap }: { snap: HubSnapshot }) {
           </div>
         </>
       )}
+    </div>
+  )
+}
+
+function TtsCard({ snap }: { snap: HubSnapshot }) {
+  const s = snap.settings.tts
+  const set = (p: Partial<TtsSettings>): void => void window.hub.setSettings({ tts: p })
+  const [text, setText] = useState('Тестовый зритель — 500 рублей. Привет со стрима!')
+  const [bad, setBad] = useState(s.badWords)
+  const [err, setErr] = useState<string | null>(null)
+  return (
+    <div className="card">
+      <h3>Озвучка <Hint id="tts" /></h3>
+      <p className="small muted" style={{ marginTop: -6 }}>Голоса Windows — работают сразу, без установки. Озвучку включают правила (раздел «Правила») или слой «Озвучка» в шаблоне алерта.</p>
+      <div className="field"><label>Голос</label><VoiceSelect value={s.voice} onChange={(v) => set({ voice: v })} /></div>
+      <div className="grid g3" style={{ gap: 10 }}>
+        <NumberField label="Скорость" value={s.rate} min={-10} max={10} suffix="−10…10" onChange={(v) => set({ rate: v })} />
+        <NumberField label="Громкость" value={s.volume} min={0} max={100} suffix="%" onChange={(v) => set({ volume: v })} />
+        <NumberField label="Читать сообщение до" value={s.maxChars} min={20} max={500} suffix="символов" onChange={(v) => set({ maxChars: v })} />
+      </div>
+      <Toggle on={s.stripLinks} onChange={(v) => set({ stripLinks: v })} label="Не читать ссылки" />
+      <div className="field" style={{ marginTop: 10 }}>
+        <label>Не читать слова (через запятую, слово вырезается целиком)</label>
+        <input className="input" value={bad} maxLength={2000} onChange={(e) => setBad(e.target.value)} onBlur={() => bad !== s.badWords && set({ badWords: bad })} />
+      </div>
+      <div className="field">
+        <label>Проверить голос</label>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <input className="input" style={{ flex: 1 }} value={text} maxLength={300} onChange={(e) => setText(e.target.value)} />
+          <button className="btn sm" onClick={() => { setErr(null); previewTts(snap, text).catch((e) => setErr(errText(e))) }}>▶ Послушать</button>
+        </div>
+        {err && <span className="small" style={{ color: '#ff7a84' }}>{err}</span>}
+      </div>
+      <p className="small muted">Здесь голос звучит в колонках ПК. На стриме озвучку играет оверлей «Алерты» — её слышно в OBS. Silero и свой голос появятся позже.</p>
     </div>
   )
 }

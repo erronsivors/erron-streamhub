@@ -1,0 +1,31 @@
+/* Crossember — стили движка алертов (оверлей и редактор). Шрифты подключает страница. */
+.ak-stage { position: relative; width: 1920px; height: 1080px; overflow: hidden; color: var(--fg); font: 600 20px/1.35 'Manrope', sans-serif; }
+.ak-stage.t-general {
+  --fg: #ffffff; --muted: #c8c8d0; --card: rgba(16, 16, 20, .72); --edge: rgba(255, 255, 255, .10);
+  --glow: 0 0 0 transparent; --title: 'Manrope', sans-serif; --kicker: #5ec8ff;
+  --grad: linear-gradient(90deg, #8e7dff, #5ec8ff);
+}
+.ak-stage.t-campfire {
+  --fg: #f3e9e2; --muted: #b9a69b; --card: rgba(26, 19, 17, .9); --edge: #9a3fd6;
+  --glow: 0 0 34px #9a3fd677; --title: 'Unbounded', sans-serif; --kicker: #ffb27a;
+  --grad: linear-gradient(90deg, #ff2d3c, #9a3fd6 50%, #2f6bff);
+}
+.ak-layer { position: absolute; left: 0; top: 0; visibility: hidden; transform-origin: 50% 50%; }
+.ak-inner { width: 100%; height: 100%; }
+.ak-content { width: 100%; height: 100%; display: flex; align-items: center; }
+.ak-media { width: 100%; height: 100%; display: block; }
+.ak-txt { width: 100%; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.15; }
+.ak-grad { background: var(--grad); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.ak-empty { width: 100%; height: 100%; display: grid; place-items: center; border: 3px dashed rgba(255,255,255,.35); border-radius: 12px; font-size: 28px; color: rgba(255,255,255,.6); }
+
+/* Классическая карточка (как в этапе 3). Размер — через --s. */
+.ak-card { --s: 1; display: flex; align-items: center; gap: calc(28px * var(--s)); padding: calc(26px * var(--s)) calc(44px * var(--s)) calc(26px * var(--s)) calc(26px * var(--s));
+  max-width: 100%; box-sizing: border-box; background: var(--card); box-shadow: 0 0 0 1.5px var(--edge), var(--glow); border-radius: calc(16px * var(--s)); }
+.ak-icon { width: calc(96px * var(--s)); height: calc(96px * var(--s)); border-radius: calc(22px * var(--s)); background: var(--grad); display: grid; place-items: center;
+  font: 800 calc(44px * var(--s)) var(--title); color: #fff; flex: none; }
+.ak-body { min-width: 0; }
+.ak-kicker { font: 800 calc(20px * var(--s)) 'Manrope', sans-serif; letter-spacing: .18em; text-transform: uppercase; color: var(--kicker); }
+.ak-who { font: 800 calc(46px * var(--s))/1.15 var(--title); margin-top: calc(6px * var(--s)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ak-who .ak-amt { margin-left: calc(18px * var(--s)); }
+.ak-text { font: 600 calc(26px * var(--s))/1.35 'Manrope', sans-serif; color: var(--muted); margin-top: calc(10px * var(--s)); overflow-wrap: anywhere; }
+.ak-test { font-size: calc(16px * var(--s)); color: var(--muted); margin-left: 14px; letter-spacing: .1em; }

@@ -50,7 +50,8 @@ const CB = (() => {
   const on = (kind, fn) => { handlers[kind] = fn; };
   const api = { el, img, parts, line, theme, on, key, build: '', connect: null, send: null, ws: null };
   api.connect = () => {
-    const ws = new WebSocket('ws://' + location.host + '/ws?k=' + encodeURIComponent(key));
+    const ov = (location.pathname.match(/^\/o\/([\w-]+)/) || [])[1] || '';
+    const ws = new WebSocket('ws://' + location.host + '/ws?k=' + encodeURIComponent(key) + (ov ? '&o=' + ov : ''));
     ws.onmessage = (m) => {
       let d;
       try { d = JSON.parse(m.data); } catch { return; }

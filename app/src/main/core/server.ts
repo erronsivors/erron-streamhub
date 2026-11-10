@@ -12,6 +12,8 @@ import type { HubEvent, ServerInfo } from './types'
 import type { AlertEngine, AlertItem } from './alerts'
 import type { Stats } from './stats'
 import type { SoundLibrary } from './sounds'
+import type { MediaLibrary } from './media'
+import type { WindowsTts } from './tts'
 
 /** Оверлеи для OBS. id = имя файла в resources/overlays, key = ключ настроек. */
 const OVERLAYS = [
@@ -30,6 +32,8 @@ const ASSETS: Record<string, string> = {
   'overlay.css': 'text/css; charset=utf-8',
   'overlay.js': 'text/javascript; charset=utf-8',
   'alert.js': 'text/javascript; charset=utf-8',
+  'alertkit.js': 'text/javascript; charset=utf-8',
+  'alertkit.css': 'text/css; charset=utf-8',
   'chat.js': 'text/javascript; charset=utf-8',
   'pinned.js': 'text/javascript; charset=utf-8',
   'remote.js': 'text/javascript; charset=utf-8',
@@ -85,6 +89,8 @@ export interface OverlayExtras {
   alerts: AlertEngine
   stats: Stats
   sounds: SoundLibrary
+  media: MediaLibrary
+  tts: WindowsTts
 }
 
 export interface RemoteActions {
@@ -104,6 +110,10 @@ export class OverlayServer {
   private local: FastifyInstance | null = null
   private lan: FastifyInstance | null = null
   private sockets = new Map<WebSocket, Kind>()
+  /** Какой оверлей открыт в каком сокете (чтобы знать, есть ли кому показать алерт). */
+  private socketOverlay = new Map<WebSocket, string>()
+  /** Изменилось число открытых оверлеев. */
+  onClients: () => void = () => undefined
   private overlayKey: string
   private remoteKey: string
   private lanError: string | null = null
@@ -168,6 +178,7 @@ export class OverlayServer {
     return {
       port: this.port,
       baseUrl,
+      overlayKey: this.overlayKey,
       overlays: OVERLAYS.filter((o) => !o.hidden).map((o) => ({ id: o.id, name: o.name, size: o.size, url: `${baseUrl}/o/${o.id}?k=${this.overlayKey}` })),
       lan: { running: !!this.lan, url: this.lanUrl, error: this.lanError, addresses: lanAddresses() }
     }
@@ -240,7 +251,24 @@ export class OverlayServer {
         if (!sameKey(req.query.k, key())) return reply.code(403).send({ error: 'forbidden' })
         const snd = await this.extras.sounds.get(req.params.file)
         if (!snd) return reply.code(404).send({ error: 'not found' })
-        return reply.type(snd.type).send(snd.body)
+        return reply.header('Cross-Origin-Resource-Policy', 'cross-origin').type(snd.type).send(snd.body)
+      })
+      // Картинки и видео конструктора (с ключом; видео браузер просит кусками — Range).
+      app.get<{ Params: { file: string }; Querystring: { k?: string } }>('/m/:file', async (req, reply) => {
+        if (!sameKey(req.query.k, key())) return reply.code(403).send({ error: 'forbidden' })
+        const range = typeof req.headers.range === 'string' ? req.headers.range : undefined
+        const m = await this.extras.media.get(req.params.file, range)
+        if (!m) return reply.code(range ? 416 : 404).send({ error: 'not found' })
+        reply.header('Cross-Origin-Resource-Policy', 'cross-origin').header('Accept-Ranges', 'bytes').type(m.type)
+        if (range) reply.code(206).header('Content-Range', `bytes ${m.start}-${m.end}/${m.size}`)
+        return reply.send(m.body)
+      })
+      // Готовая озвучка.
+      app.get<{ Params: { file: string }; Querystring: { k?: string } }>('/t/:file', async (req, reply) => {
+        if (!sameKey(req.query.k, key())) return reply.code(403).send({ error: 'forbidden' })
+        const body = await this.extras.tts.get(req.params.file)
+        if (!body) return reply.code(404).send({ error: 'not found' })
+        return reply.header('Cross-Origin-Resource-Policy', 'cross-origin').type('audio/wav').send(body)
       })
     }
 
@@ -257,7 +285,14 @@ export class OverlayServer {
         return
       }
       this.sockets.set(socket, kind)
-      socket.on('close', () => this.sockets.delete(socket))
+      const ov = typeof (req.query as { o?: unknown }).o === 'string' ? String((req.query as { o?: unknown }).o).slice(0, 20) : ''
+      if (kind === 'local' && ov) this.socketOverlay.set(socket, ov)
+      this.onClients()
+      socket.on('close', () => {
+        this.sockets.delete(socket)
+        this.socketOverlay.delete(socket)
+        this.onClients()
+      })
       socket.send(this.hello(kind))
       if (kind === 'local') {
         socket.on('message', () => undefined) // оверлеи только слушают
@@ -299,6 +334,13 @@ export class OverlayServer {
     this.local = await this.build('local', '127.0.0.1', this.port)
     this.hub.setStatus('hub', 'ok', `Сервер оверлеев: 127.0.0.1:${this.port}`)
     await this.applyLan()
+  }
+
+  /** Сколько копий оверлея открыто (в OBS, браузере). */
+  openCount(id: string): number {
+    let n = 0
+    for (const v of this.socketOverlay.values()) if (v === id) n++
+    return n
   }
 
   /** Ссылка на оверлей по id (для окна «чат поверх игры»). */

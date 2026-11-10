@@ -4,6 +4,9 @@ import type { ChatPlatformState } from './connector'
 import type { AlertQueueState } from './alerts'
 import type { DonationServiceState } from './donations/common'
 import type { SoundInfo } from './sounds'
+import type { MediaInfo } from './media'
+import type { AlertTemplate } from './templates'
+import type { RulesState } from './rules'
 
 export type Platform = 'twitch' | 'youtube' | 'vk' | 'kick' | 'goodgame' | 'donationalerts' | 'donatepay' | 'donatex' | 'boosty' | 'obs' | 'hub'
 
@@ -75,6 +78,8 @@ export interface ServerInfo {
   port: number
   baseUrl: string
   overlays: OverlayInfo[]
+  /** Ключ оверлеев: редактор алертов берёт по нему картинки, видео и озвучку для предпросмотра. */
+  overlayKey: string
   lan: { running: boolean; url: string | null; error: string | null; addresses: string[] }
 }
 
@@ -120,5 +125,10 @@ export interface HubSnapshot {
   alerts: AlertQueueState
   donations: DonationServiceState[]
   sounds: SoundInfo[]
+  media: MediaInfo[]
+  templates: AlertTemplate[]
+  rules: RulesState
+  /** Сколько копий оверлея «Алерты» сейчас открыто (0 — алерты и озвучку некому показать). */
+  alertOverlays: number
   float: { open: boolean; editing: boolean; hotkey: string }
 }

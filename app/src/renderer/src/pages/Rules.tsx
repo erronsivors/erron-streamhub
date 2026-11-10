@@ -1,0 +1,335 @@
+import { useState, type ReactNode } from 'react'
+import type { HubSnapshot, Platform } from '../../../main/core/types'
+import type { Rule, RuleAction, TriggerType } from '../../../main/core/rules'
+import type { ObsAction } from '../../../main/core/templates'
+import { Hint, Toggle, errText } from '../components'
+import { PlatIcon, fmtTime } from '../ui'
+import { ObsActionEditor, SoundSelect, VoiceSelect, previewSound, previewTts } from '../editors'
+
+export const TRIGGERS: { id: TriggerType; label: string; ico: string }[] = [
+  { id: 'donation', label: 'Донат', ico: '₽' }, { id: 'sub', label: 'Подписка', ico: '★' }, { id: 'gift', label: 'Подарки', ico: '🎁' },
+  { id: 'follow', label: 'Фоллоу', ico: '♥' }, { id: 'raid', label: 'Рейд', ico: '↗' }, { id: 'bits', label: 'Биты', ico: '◆' },
+  { id: 'reward', label: 'Баллы', ico: '✦' }, { id: 'message', label: 'Сообщение в чате', ico: '💬' }
+]
+const PLATFORMS: { id: Platform; label: string }[] = [
+  { id: 'twitch', label: 'Twitch' }, { id: 'youtube', label: 'YouTube' }, { id: 'vk', label: 'VK' }, { id: 'kick', label: 'Kick' },
+  { id: 'goodgame', label: 'GoodGame' }, { id: 'donationalerts', label: 'DonationAlerts' }, { id: 'donatepay', label: 'DonatePay' },
+  { id: 'donatex', label: 'DonateX' }, { id: 'boosty', label: 'Boosty' }
+]
+const ACTIONS: { type: RuleAction['type']; ico: string; title: string; desc: string }[] = [
+  { type: 'alert', ico: '✦', title: 'Показать алерт', desc: 'Шаблон из раздела «Алерты»' },
+  { type: 'tts', ico: '🗣', title: 'Озвучить', desc: 'Прочитать ник, сумму и сообщение' },
+  { type: 'sound', ico: '♪', title: 'Звук', desc: 'Встроенный или свой файл' },
+  { type: 'obs', ico: '◧', title: 'Действие в OBS', desc: 'Сцена, источник, фильтр, текст' }
+]
+const RESULT: Record<string, string> = { done: 'выполнено', dry: 'проверка', cooldown: 'кулдаун', error: 'ошибка', test: 'тест' }
+const AMOUNT_TYPES: TriggerType[] = ['donation', 'bits', 'raid', 'gift', 'sub']
+
+const newRule = (): Rule => ({
+  id: crypto.randomUUID(), name: '', enabled: true, types: ['donation'], platforms: [],
+  filter: { minAmount: 0, maxAmount: 0, textContains: '', users: '', tests: 'any' }, cooldownSec: 0, cooldownPerUser: false, stop: false, actions: []
+})
+
+function newAction(type: RuleAction['type'], snap: HubSnapshot): RuleAction {
+  if (type === 'alert') return { type, templateId: snap.templates[0]?.id ?? '' }
+  if (type === 'tts') return { type, text: '{user} — {amount}. {message}', voice: '', rate: 0, volume: 100 }
+  if (type === 'sound') return { type, sound: 'coin', volume: 80 }
+  const obs: ObsAction = { op: 'source', scene: '', source: '', filter: '', mode: 'show', media: 'restart', text: '', revertSec: 10 }
+  return { type, obs }
+}
+
+const unit = (r: Rule): string => r.types.length === 1 && r.types[0] === 'donation' ? ' ₽' : ''
+const num = (n: number): string => n.toLocaleString('ru-RU')
+
+function actionPill(a: RuleAction, snap: HubSnapshot): { ico: string; text: string } {
+  if (a.type === 'alert') return { ico: '✦', text: `Алерт «${snap.templates.find((t) => t.id === a.templateId)?.name ?? 'не выбран'}»` }
+  if (a.type === 'tts') return { ico: '🗣', text: 'Озвучка' }
+  if (a.type === 'sound') return { ico: '♪', text: 'Звук' }
+  const o = a.obs
+  const what = o.op === 'scene' ? `сцена «${o.scene || '?'}»` : o.op === 'filter' ? `фильтр «${o.filter || '?'}»` : o.op === 'text' ? `текст «${o.source || '?'}»` : `«${o.source || '?'}»`
+  return { ico: '◧', text: `OBS: ${what}` }
+}
+
+/** Человеческое название, если пользователь его не задал. */
+function autoName(r: Rule): string {
+  const t = r.types.map((x) => TRIGGERS.find((y) => y.id === x)?.label).filter(Boolean).join(' / ') || 'Правило'
+  return r.filter.minAmount ? `${t} от ${num(r.filter.minAmount)}${unit(r)}` : t
+}
+
+export function OverlayWarning({ snap }: { snap: HubSnapshot }) {
+  if (snap.alertOverlays > 0) return null
+  return (
+    <div className="note warnbox btnrow" style={{ marginBottom: 14 }}>
+      <span style={{ flex: 1, minWidth: 240 }}>Оверлей «Алерты» сейчас нигде не открыт, поэтому алерты, звуки и озвучку некому показать. Добавьте его в OBS (раздел «Оверлеи») или откройте в браузере, чтобы проверить.</span>
+      <button className="btn sm" onClick={() => void window.hub.openOverlay('alert')}>Открыть в браузере</button>
+    </div>
+  )
+}
+
+export function Rules({ snap }: { snap: HubSnapshot }) {
+  const st = snap.rules
+  const [editing, setEditing] = useState<Rule | null>(null)
+  const [err, setErr] = useState<string | null>(null)
+  const wrap = (p: Promise<unknown>): void => { setErr(null); p.catch((e) => setErr(errText(e))) }
+  const isNew = editing && !st.rules.some((r) => r.id === editing.id)
+
+  return (
+    <>
+      <div className="head">
+        <div>
+          <h1>Правила <Hint id="rules" /></h1>
+          <p>Что делать, когда на стриме что-то происходит. Правила проверяются сверху вниз.</p>
+        </div>
+        <div className="actions">
+          <button className="btn sm" onClick={() => wrap(window.hub.rulesFlags({ enabled: !st.enabled }))}>
+            {st.enabled ? '■ Остановить все' : '▶ Включить все'}
+          </button>
+          <button className="btn sm primary" disabled={!!isNew} onClick={() => setEditing(newRule())}>+ Новое правило</button>
+        </div>
+      </div>
+      <OverlayWarning snap={snap} />
+      {!st.enabled && <div className="note warnbox" style={{ marginBottom: 14 }}>Все правила остановлены: события идут только в ленту.</div>}
+      {st.dryRun && <div className="note" style={{ marginBottom: 14 }}>Режим проверки: в журнал пишется, что сработало бы, но ничего не выполняется.</div>}
+      {err && <div className="note warnbox" style={{ marginBottom: 14 }}>{err}</div>}
+
+      <div className="rules-layout">
+        <div className="rules">
+          {isNew && <RuleEditor key={editing.id} rule={editing} snap={snap} onClose={() => setEditing(null)} />}
+          {st.rules.map((r, i) => editing?.id === r.id
+            ? <RuleEditor key={r.id} rule={editing} snap={snap} onClose={() => setEditing(null)} />
+            : <RuleRow key={r.id} r={r} snap={snap} first={i === 0} last={i === st.rules.length - 1} wrap={wrap} onEdit={() => setEditing(structuredClone(r))} />)}
+          {!st.rules.length && !editing && <div className="card"><p className="muted">Правил пока нет. Нажмите «+ Новое правило».</p></div>}
+        </div>
+
+        <div className="grid" style={{ alignContent: 'start' }}>
+          <div className="card">
+            <h3>Журнал <button className="btn sm r" disabled={!st.log.length} onClick={() => wrap(window.hub.rulesClearLog())}>Очистить</button></h3>
+            <Toggle on={st.dryRun} onChange={(v) => wrap(window.hub.rulesFlags({ dryRun: v }))} label={<>Проверять без выполнения <Hint id="dryRun" /></>} />
+            {st.log.length ? <div className="list" style={{ marginTop: 8 }}>{st.log.map((l, i) => (
+              <div key={i} className="row">
+                <PlatIcon p={l.platform} />
+                <div className="grow">
+                  <b className="ellipsis">{l.ruleName} <span className={`tag ${l.result === 'cooldown' || l.result === 'error' ? 'warn' : l.result === 'test' || l.result === 'dry' ? 'test' : ''}`}>{RESULT[l.result]}</span></b>
+                  <span className="small muted ellipsis" style={{ display: 'block' }}>{l.user} · {l.detail}</span>
+                </div>
+                <span className="small muted">{fmtTime(l.ts)}</span>
+              </div>
+            ))}</div> : <p className="small muted">Здесь появится, какое правило на что сработало.</p>}
+          </div>
+        </div>
+      </div>
+    </>
+  )
+}
+
+function RuleRow({ r, snap, first, last, wrap, onEdit }: { r: Rule; snap: HubSnapshot; first: boolean; last: boolean; wrap: (p: Promise<unknown>) => void; onEdit: () => void }) {
+  const f = r.filter
+  const conds: string[] = []
+  if (f.minAmount && f.maxAmount) conds.push(`${num(f.minAmount)}–${num(f.maxAmount)}${unit(r)}`)
+  else if (f.minAmount) conds.push(`от ${num(f.minAmount)}${unit(r)}`)
+  else if (f.maxAmount) conds.push(`до ${num(f.maxAmount)}${unit(r)}`)
+  if (f.textContains) conds.push(`текст: ${f.textContains}`)
+  if (f.users) conds.push(`ники: ${f.users}`)
+  if (r.platforms.length) conds.push(r.platforms.map((p) => PLATFORMS.find((x) => x.id === p)?.label).join(', '))
+  return (
+    <div className={`rule ${r.enabled ? '' : 'off'}`}>
+      <div className="rule-move">
+        <button title="Выше" disabled={first} onClick={() => wrap(window.hub.ruleMove(r.id, -1))}>▲</button>
+        <button title="Ниже" disabled={last} onClick={() => wrap(window.hub.ruleMove(r.id, 1))}>▼</button>
+      </div>
+      <Toggle on={r.enabled} onChange={(v) => wrap(window.hub.rulePut({ ...r, enabled: v }))} label="" />
+      <div className="rule-body" onClick={onEdit}>
+        <div className="rule-name">{r.name}</div>
+        <div className="rule-flow">
+          <span className="lbl">Когда</span>
+          {r.types.length ? r.types.map((t) => { const x = TRIGGERS.find((y) => y.id === t)!; return <span key={t} className="pill"><i>{x.ico}</i>{x.label}</span> }) : <span className="pill dim">ничего не выбрано</span>}
+          {conds.map((c) => <span key={c} className="pill dim">{c}</span>)}
+          <span className="arrow">→</span>
+          {r.actions.length ? r.actions.map((a, i) => { const p = actionPill(a, snap); return <span key={i} className={`pill act a-${a.type}`}><i>{p.ico}</i>{p.text}</span> }) : <span className="pill dim">нет действий</span>}
+        </div>
+        {(r.cooldownSec > 0 || r.stop) && <div className="rule-meta">{r.cooldownSec > 0 && `кулдаун ${r.cooldownSec} с${r.cooldownPerUser ? ' на зрителя' : ''}`}{r.cooldownSec > 0 && r.stop && ' · '}{r.stop && 'правила ниже не проверяются'}</div>}
+      </div>
+      <div className="rule-tools">
+        <button className="btn sm" title="Выполнить действия на тестовом событии" onClick={() => wrap(window.hub.ruleTest(r.id, r.types[0] ?? 'donation'))}>Тест</button>
+        <button className="btn sm" onClick={onEdit}>Изменить</button>
+      </div>
+    </div>
+  )
+}
+
+function Step({ n, title, hint, children, aside }: { n: number; title: string; hint?: string; children: ReactNode; aside?: ReactNode }) {
+  return (
+    <div className="step">
+      <div className="step-n">{n}</div>
+      <div className="step-body">
+        <div className="step-title">{title} {hint && <Hint id={hint} />}{aside && <span className="step-aside">{aside}</span>}</div>
+        {children}
+      </div>
+    </div>
+  )
+}
+
+function NumIn({ value, onChange, min = 0, max = 10_000_000, width }: { value: number; onChange: (n: number) => void; min?: number; max?: number; width?: number }) {
+  return (
+    <input className="input mono" style={{ width: width ?? '100%' }} type="number" min={min} max={max} defaultValue={value} key={value}
+      onBlur={(e) => { const n = Math.min(max, Math.max(min, Math.round(Number(e.target.value) || 0))); if (n !== value) onChange(n) }} />
+  )
+}
+
+function RuleEditor({ rule, snap, onClose }: { rule: Rule; snap: HubSnapshot; onClose: () => void }) {
+  const [r, setR] = useState<Rule>(rule)
+  const [err, setErr] = useState<string | null>(null)
+  const [confirmDel, setConfirmDel] = useState(false)
+  const [showText, setShowText] = useState(!!rule.filter.textContains)
+  const [showUsers, setShowUsers] = useState(!!rule.filter.users)
+  const [showPlat, setShowPlat] = useState(rule.platforms.length > 0)
+  const exists = snap.rules.rules.some((x) => x.id === rule.id)
+  const dirty = JSON.stringify(r) !== JSON.stringify(rule)
+  const set = (p: Partial<Rule>): void => setR({ ...r, ...p })
+  const setF = (p: Partial<Rule['filter']>): void => setR({ ...r, filter: { ...r.filter, ...p } })
+  const setA = (i: number, a: RuleAction): void => setR({ ...r, actions: r.actions.map((x, j) => (j === i ? a : x)) })
+  const hasAmount = r.types.some((t) => AMOUNT_TYPES.includes(t))
+  const toggleType = (t: TriggerType): void => set({ types: r.types.includes(t) ? r.types.filter((x) => x !== t) : [...r.types, t] })
+  const togglePlat = (p: Platform): void => set({ platforms: r.platforms.includes(p) ? r.platforms.filter((x) => x !== p) : [...r.platforms, p] })
+
+  const save = (): void => {
+    setErr(null)
+    window.hub.rulePut({ ...r, name: r.name.trim() || autoName(r) }).then(onClose).catch((e) => setErr(errText(e)))
+  }
+
+  return (
+    <div className="card ruleedit">
+      <div className="btnrow" style={{ marginBottom: 6 }}>
+        <input className="input ruleedit-name" value={r.name} maxLength={60} placeholder={autoName(r)} onChange={(e) => set({ name: e.target.value })} />
+        {dirty && <span className="tag warn">Есть изменения</span>}
+      </div>
+
+      <Step n={1} title="Когда это происходит">
+        <div className="chips big">
+          {TRIGGERS.map((x) => <button key={x.id} className={r.types.includes(x.id) ? 'on' : ''} onClick={() => toggleType(x.id)}><i>{x.ico}</i>{x.label}</button>)}
+        </div>
+        {!showPlat
+          ? <button className="linkbtn" onClick={() => setShowPlat(true)}>Со всех площадок · выбрать конкретные</button>
+          : <div className="chips">
+              <button className={r.platforms.length === 0 ? 'on' : ''} onClick={() => set({ platforms: [] })}>Все площадки</button>
+              {PLATFORMS.map((p) => <button key={p.id} className={r.platforms.includes(p.id) ? 'on' : ''} onClick={() => togglePlat(p.id)}>{p.label}</button>)}
+            </div>}
+      </Step>
+
+      <Step n={2} title="Если" hint="ruleFilter" aside={!hasAmount && !showText && !showUsers ? 'необязательно' : undefined}>
+        {hasAmount && (
+          <div className="inline-cond">
+            <span>Сумма от</span><NumIn width={120} value={r.filter.minAmount} onChange={(n) => setF({ minAmount: n })} />
+            <span>до</span><NumIn width={120} value={r.filter.maxAmount} onChange={(n) => setF({ maxAmount: n })} />
+            <span className="muted small">0 — без ограничения{r.types.includes('donation') ? ', донаты в рублях' : ''}</span>
+          </div>
+        )}
+        {showText && (
+          <div className="inline-cond">
+            <span>В тексте есть</span>
+            <input className="input" style={{ flex: 1 }} value={r.filter.textContains} maxLength={200} placeholder={r.types.includes('message') ? '!сцена, !привет' : 'слова через запятую'} onChange={(e) => setF({ textContains: e.target.value })} />
+            <button className="btn sm" title="Убрать условие" onClick={() => { setF({ textContains: '' }); setShowText(false) }}>✕</button>
+          </div>
+        )}
+        {showUsers && (
+          <div className="inline-cond">
+            <span>Только от</span>
+            <input className="input" style={{ flex: 1 }} value={r.filter.users} maxLength={300} placeholder="ники через запятую" onChange={(e) => setF({ users: e.target.value })} />
+            <button className="btn sm" title="Убрать условие" onClick={() => { setF({ users: '' }); setShowUsers(false) }}>✕</button>
+          </div>
+        )}
+        <div className="btnrow">
+          {!showText && <button className="linkbtn" onClick={() => setShowText(true)}>+ слово в тексте</button>}
+          {!showUsers && <button className="linkbtn" onClick={() => setShowUsers(true)}>+ только определённые ники</button>}
+        </div>
+      </Step>
+
+      <Step n={3} title="Тогда">
+        {r.actions.map((a, i) => {
+          const meta = ACTIONS.find((x) => x.type === a.type)!
+          return (
+            <div key={i} className={`action a-${a.type}`}>
+              <div className="action-head">
+                <i>{meta.ico}</i><b>{meta.title}</b>
+                <button className="iconbtn" title="Убрать действие" onClick={() => set({ actions: r.actions.filter((_, j) => j !== i) })}>✕</button>
+              </div>
+              {a.type === 'alert' && (
+                <>
+                  <select className="input" value={a.templateId} onChange={(e) => setA(i, { ...a, templateId: e.target.value })}>
+                    {!snap.templates.some((t) => t.id === a.templateId) && <option value={a.templateId}>— выберите шаблон —</option>}
+                    {snap.templates.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                  </select>
+                  <p className="small muted" style={{ margin: '6px 0 0' }}>Как выглядит алерт, настраивается в «Алерты» → «Шаблоны».</p>
+                </>
+              )}
+              {a.type === 'tts' && (
+                <>
+                  <div className="field" style={{ marginBottom: 8 }}>
+                    <label>Что читать — {'{user}'} ник, {'{amount}'} сумма, {'{message}'} сообщение</label>
+                    <input className="input" value={a.text} maxLength={300} onChange={(e) => setA(i, { ...a, text: e.target.value })} />
+                  </div>
+                  <div className="action-grid">
+                    <div className="field"><label>Голос</label><VoiceSelect allowDefault value={a.voice} onChange={(v) => setA(i, { ...a, voice: v })} /></div>
+                    <div className="field"><label>Скорость</label><NumIn min={-10} max={10} value={a.rate} onChange={(n) => setA(i, { ...a, rate: n })} /></div>
+                    <div className="field"><label>Громкость, %</label><NumIn max={100} value={a.volume} onChange={(n) => setA(i, { ...a, volume: n })} /></div>
+                  </div>
+                  <button className="btn sm" onClick={() => previewTts(snap, a.text.replace('{user}', 'Тестовый зритель').replace('{amount}', '500 рублей').replace('{message}', 'Привет со стрима!')).catch((e) => setErr(errText(e)))}>▶ Послушать</button>
+                </>
+              )}
+              {a.type === 'sound' && (
+                <div className="action-grid">
+                  <div className="field"><label>Звук</label><SoundSelect snap={snap} value={a.sound} onChange={(v) => setA(i, { ...a, sound: v })} /></div>
+                  <div className="field"><label>Громкость, %</label><NumIn max={100} value={a.volume} onChange={(n) => setA(i, { ...a, volume: n })} /></div>
+                  <div className="field"><label>&nbsp;</label><button className="btn sm" onClick={() => previewSound(snap, a.sound, a.volume / 100)}>▶ Послушать</button></div>
+                </div>
+              )}
+              {a.type === 'obs' && <ObsActionEditor value={a.obs} onChange={(o) => setA(i, { ...a, obs: o })} />}
+            </div>
+          )
+        })}
+        {r.actions.length < 20 && (
+          <>
+            {r.actions.length > 0 && <div className="small muted" style={{ margin: '4px 0 8px' }}>Добавить ещё:</div>}
+            <div className="tiles">
+              {ACTIONS.map((x) => (
+                <button key={x.type} className={`tile a-${x.type}`} onClick={() => set({ actions: [...r.actions, newAction(x.type, snap)] })}>
+                  <i>{x.ico}</i><b>{x.title}</b><span>{x.desc}</span>
+                </button>
+              ))}
+            </div>
+          </>
+        )}
+      </Step>
+
+      <details className="more">
+        <summary>Дополнительно: кулдаун, тестовые события, порядок</summary>
+        <div className="more-body">
+          <div className="inline-cond">
+            <span>Не чаще раза в</span><NumIn width={100} max={86400} value={r.cooldownSec} onChange={(n) => set({ cooldownSec: n })} /><span>сек</span>
+            <Hint id="ruleCooldown" />
+          </div>
+          {r.cooldownSec > 0 && <Toggle on={r.cooldownPerUser} onChange={(v) => set({ cooldownPerUser: v })} label="Считать отдельно для каждого зрителя" />}
+          <div className="inline-cond">
+            <span>Тестовые события</span>
+            <select className="input" style={{ width: 'auto' }} value={r.filter.tests} onChange={(e) => setF({ tests: e.target.value as Rule['filter']['tests'] })}>
+              <option value="any">тоже срабатывают</option><option value="real">не срабатывают</option><option value="test">только они</option>
+            </select>
+          </div>
+          <Toggle on={r.stop} onChange={(v) => set({ stop: v })} label={<>Если сработало — правила ниже не проверять <Hint id="ruleStop" /></>} />
+        </div>
+      </details>
+
+      {r.actions.some((a) => a.type === 'tts' || a.type === 'sound') && (
+        <p className="small muted">Озвучка и звук играют вместе с первым алертом этого события, а если алерта нет — сами по себе, в той же очереди.</p>
+      )}
+      {err && <p className="small" style={{ color: '#ff7a84' }}>{err}</p>}
+      <div className="btnrow" style={{ marginTop: 14 }}>
+        <button className="btn primary" onClick={save}>Сохранить</button>
+        <button className="btn" onClick={onClose}>Отмена</button>
+        {exists && (confirmDel
+          ? <button className="btn" style={{ marginLeft: 'auto', borderColor: '#ff7a84', color: '#ff7a84' }} onClick={() => { void window.hub.ruleRemove(rule.id); onClose() }}>Точно удалить?</button>
+          : <button className="btn" style={{ marginLeft: 'auto' }} onClick={() => setConfirmDel(true)}>Удалить</button>)}
+      </div>
+    </div>
+  )
+}

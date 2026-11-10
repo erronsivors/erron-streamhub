@@ -42,7 +42,7 @@ export interface AlertTier {
   durationSec: number
 }
 
-/** Правило алерта для одного типа события. */
+/** Правило алерта для одного типа события (этап 3; с этапа 4 — только для переноса в правила и шаблоны). */
 export interface AlertRule {
   enabled: boolean
   /** Минимальная сумма (₽ / биты / зрители рейда); меньше — без алерта, только в ленте. */
@@ -66,6 +66,23 @@ export interface AlertSettings {
   /** Общая громкость, %. */
   volume: number
   rules: Record<AlertKind, AlertRule>
+}
+
+/** Озвучка. engine — задел под Silero / свой голос (Chatterbox). */
+export interface TtsSettings {
+  engine: 'windows'
+  /** Голос Windows; пусто — первый русский. */
+  voice: string
+  /** Скорость −10…10. */
+  rate: number
+  /** Громкость, %. */
+  volume: number
+  /** Сколько символов сообщения читать. */
+  maxChars: number
+  /** Не читать ссылки. */
+  stripLinks: boolean
+  /** Слова через запятую, которые не читать (вырезаются вместе со словом). */
+  badWords: string
 }
 
 export type StatsPeriod = 'stream' | 'today' | 'week' | 'month' | 'all'
@@ -93,6 +110,7 @@ export interface AppSettings {
   /** Boosty: опрос внутреннего API (неофициально, только чтение). */
   boosty: { poll: boolean }
   alerts: AlertSettings
+  tts: TtsSettings
   lan: {
     enabled: boolean
     host: string
@@ -153,6 +171,7 @@ export const DEFAULTS: AppSettings = {
   donatex: { customClientId: '' },
   boosty: { poll: false },
   alerts: ALERT_DEFAULTS,
+  tts: { engine: 'windows', voice: '', rate: 0, volume: 100, maxChars: 200, stripLinks: true, badWords: '' },
   lan: { enabled: false, host: '', port: 47833 },
   overlays: {
     alert: { theme: 'general' },
@@ -277,6 +296,19 @@ export function sanitize(input: unknown, base: AppSettings = DEFAULTS): AppSetti
     donatex: { customClientId: appId(obj(i.donatex).customClientId, base.donatex?.customClientId ?? '') },
     boosty: { poll: bool(obj(i.boosty).poll, base.boosty?.poll ?? false) },
     alerts: alerts(i.alerts, base.alerts ?? ALERT_DEFAULTS),
+    tts: (() => {
+      const o = obj(i.tts)
+      const b = base.tts ?? DEFAULTS.tts
+      return {
+        engine: 'windows' as const,
+        voice: text(o.voice, b.voice, 100),
+        rate: int(o.rate, b.rate, -10, 10),
+        volume: int(o.volume, b.volume, 0, 100),
+        maxChars: int(o.maxChars, b.maxChars, 20, 500),
+        stripLinks: bool(o.stripLinks, b.stripLinks),
+        badWords: text(o.badWords, b.badWords, 2000)
+      }
+    })(),
     lan: {
       enabled: bool(lan.enabled, base.lan.enabled),
       host: host === '' || /^(\d{1,3}\.){3}\d{1,3}$/.test(host) ? host : base.lan.host,

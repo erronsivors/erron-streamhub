@@ -1,61 +1,42 @@
 'use strict';
 // Оверлей алертов. Очередь живёт в Crossember: оверлей только показывает то, что пришло ('alert'),
-// и прячет по команде ('alert-end'). Поэтому пауза, пропуск и «стоп всё» работают из приложения.
+// и прячет по команде ('alert-end'). Сам алерт — слои конструктора, их рисует общий движок alertkit.js.
 const stage = document.getElementById('stage');
-const ICON = { donation: '₽', sub: '★', gift: '🎁', follow: '♥', raid: '↗', bits: '◆', reward: '✦' };
 let shownId = null;
-let audio = null;
+let handle = null;
+let theme = 'general';
+let hideTimer = null;
 
-function render(a) {
-  const box = CB.el('div', 'alert card k-' + a.kind);
-  box.append(CB.el('div', 'icon', ICON[a.kind] || '!'));
-  const body = CB.el('div');
-  const kicker = CB.el('div', 'kicker', a.kicker);
-  if (a.test) kicker.append(CB.el('span', 'test', 'ТЕСТ'));
-  const who = CB.el('div', 'who');
-  for (const p of a.title || []) who.append(p.t === 'amount' ? CB.el('span', 'amt grad', p.v) : document.createTextNode(p.v));
-  body.append(kicker, who);
-  if (a.text) body.append(CB.el('div', 'text', a.text));
-  box.append(body);
-  return box;
+// Холст алерта 1920×1080; если источник в OBS другого размера — масштабируем целиком.
+function fit() {
+  const k = Math.min(window.innerWidth / AlertKit.W, window.innerHeight / AlertKit.H) || 1;
+  stage.style.transform = 'scale(' + k + ')';
 }
+window.addEventListener('resize', fit);
+fit();
 
-function sound(a) {
-  if (audio) { audio.pause(); audio = null; }
-  if (!a.sound || !(a.volume > 0)) return;
-  if (a.sound.builtin) return CBSound.play(a.sound.builtin, a.volume);
-  // Свой файл: только с нашего сервера по строгому шаблону.
-  if (typeof a.sound.url === 'string' && /^\/s\/[0-9a-f]{32}\.(mp3|wav|ogg)$/.test(a.sound.url)) {
-    audio = new Audio(a.sound.url + '?k=' + encodeURIComponent(CB.key));
-    audio.volume = Math.min(1, a.volume);
-    audio.play().catch(() => {});
-  }
+const url = (src) => src + '?k=' + encodeURIComponent(CB.key);
+
+function show(a) {
+  if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
+  if (handle) handle.stop();
+  stage.classList.remove('gone');
+  shownId = a.id;
+  handle = AlertKit.mount(stage, a, { url, theme, playBuiltin: (id, v) => CBSound.play(id, v) });
 }
 
 function hide() {
-  const box = stage.firstElementChild;
   shownId = null;
-  if (!box) return;
-  box.classList.remove('show');
-  setTimeout(() => { if (box.parentNode && !box.classList.contains('show')) box.remove(); }, 600);
+  const h = handle;
+  handle = null;
+  if (!h) return;
+  stage.classList.add('gone');
+  hideTimer = setTimeout(() => { h.stop(); stage.classList.remove('gone'); hideTimer = null; }, 400);
 }
 
-function show(a) {
-  stage.replaceChildren();
-  const box = render(a);
-  stage.append(box);
-  shownId = a.id;
-  requestAnimationFrame(() => requestAnimationFrame(() => box.classList.add('show')));
-  sound(a);
-}
-
-CB.on('hello', (d) => CB.theme(d.overlays.alert.theme));
-CB.on('config', (d) => CB.theme(d.overlays.alert.theme));
+const setTheme = (d) => { theme = d.overlays.alert.theme === 'campfire' ? 'campfire' : 'general'; CB.theme(theme); };
+CB.on('hello', setTheme);
+CB.on('config', setTheme);
 CB.on('alert', (d) => { if (d.alert) show(d.alert); });
-CB.on('alert-end', (d) => {
-  if (d.id === shownId) {
-    hide();
-    if (audio) { audio.pause(); audio = null; }
-  }
-});
+CB.on('alert-end', (d) => { if (d.id === shownId) hide(); });
 CB.connect();

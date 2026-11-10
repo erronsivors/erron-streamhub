@@ -1,28 +1,43 @@
 import { EventEmitter } from 'node:events'
 import { randomUUID } from 'node:crypto'
 import type { Hub } from './hub'
-import type { Settings, AlertKind } from './settings'
-import { ALERT_KINDS } from './settings'
+import type { Settings, Theme } from './settings'
 import type { HubEvent, Platform } from './types'
+import type { AlertTemplate, Layer, ObsAction } from './templates'
+import type { RulePlan } from './rules'
+import { cleanForSpeech, type WindowsTts } from './tts'
 
-/** Кусок заголовка алерта: обычный текст или сумма (выделяется цветом). */
+/** Кусок текста: обычный текст или сумма (выделяется цветом). */
 export type AlertTitlePart = { t: 'text' | 'amount'; v: string }
 
-/** Готовый к показу алерт. Весь текст — простой текст, оверлей выводит его через textContent. */
+/** Слой, готовый к показу: подстановки сделаны, файлы превращены в ссылки нашего сервера. Весь текст — простой текст. */
+export interface AlertLayerOut extends Layer {
+  /** text / card: главная строка по кусочкам. */
+  parts?: AlertTitlePart[]
+  /** card: верхняя строка. */
+  kickerText?: string
+  /** card: сообщение зрителя. */
+  message?: string | null
+  /** image / video: /m/<файл>; tts: /t/<файл>; sound (свой файл): /s/<файл>. */
+  src?: string
+  /** sound: встроенный звук оверлея. */
+  builtin?: string
+  /** Итоговая громкость 0…1. */
+  vol?: number
+}
+
+/** Готовый к показу алерт. */
 export interface AlertItem {
   id: string
   eventId: string
-  kind: AlertKind
+  kind: string
   platform: Platform
   user: string
-  kicker: string
-  title: AlertTitlePart[]
-  text: string | null
-  /** builtin — встроенный звук оверлея; url — свой файл с сервера Crossember. */
-  sound: { builtin: string } | { url: string } | null
-  /** 0…1 с учётом общей громкости. */
-  volume: number
+  /** Краткое описание для очереди в интерфейсе. */
+  summary: string
+  theme: 'auto' | Theme
   durationMs: number
+  layers: AlertLayerOut[]
   test: boolean
   replay: boolean
 }
@@ -41,9 +56,13 @@ export const PLATFORM_NAMES: Record<Platform, string> = {
 
 const QUEUE_LIMIT = 100
 const CURRENCY: Record<string, string> = { RUB: '₽', USD: '$', EUR: '€', UAH: '₴', KZT: '₸', BYN: 'Br' }
+const CURRENCY_WORDS: Record<string, [string, string, string]> = {
+  RUB: ['рубль', 'рубля', 'рублей'], USD: ['доллар', 'доллара', 'долларов'], EUR: ['евро', 'евро', 'евро'],
+  UAH: ['гривна', 'гривны', 'гривен'], KZT: ['тенге', 'тенге', 'тенге'], BYN: ['белорусский рубль', 'белорусских рубля', 'белорусских рублей']
+}
 
-function plural(n: number, one: string, few: string, many: string): string {
-  const a = Math.abs(n) % 100
+export function plural(n: number, one: string, few: string, many: string): string {
+  const a = Math.abs(Math.trunc(n)) % 100
   const b = a % 10
   if (a > 10 && a < 20) return many
   if (b > 1 && b < 5) return few
@@ -56,105 +75,201 @@ export function money(amount: number, currency?: string): string {
   return `${amount.toLocaleString('ru-RU', { maximumFractionDigits: 2 })} ${sym}`.trim()
 }
 
-function amountText(e: HubEvent, kind: AlertKind): string {
+/** Сумма события словами для экрана ({amount}). */
+function amountText(e: HubEvent): string {
   const n = e.amount ?? 0
-  switch (kind) {
-    case 'donation': return money(n, e.currency)
+  switch (e.type) {
+    case 'donation': return n ? money(n, e.currency) : ''
     case 'bits': return `${n} ${plural(n, 'бит', 'бита', 'бит')}`
     case 'gift': return `${n} ${plural(n, 'подписку', 'подписки', 'подписок')}`
     default: return n ? String(n) : ''
   }
 }
 
+/** Сумма для озвучки: «500 рублей» вместо «500 ₽». */
+function amountSpoken(e: HubEvent): string {
+  if (e.type === 'donation' && e.amount) {
+    const w = CURRENCY_WORDS[e.currency ?? 'RUB']
+    const n = Math.round(e.amount * 100) / 100
+    return w ? `${n} ${Number.isInteger(n) ? plural(n, ...w) : w[1]}` : `${n} ${e.currency ?? ''}`
+  }
+  return amountText(e)
+}
+
+const PLACEHOLDER = /(\{user\}|\{amount\}|\{message\}|\{platform\})/
+
+/** Подставить {user} {amount} {message} {platform} в простой текст. */
+export function fill(tpl: string, e: HubEvent, message = e.text ?? '', amount = amountText(e)): string {
+  return tpl.split(PLACEHOLDER).map((p) =>
+    p === '{user}' ? e.user : p === '{amount}' ? amount : p === '{message}' ? message : p === '{platform}' ? PLATFORM_NAMES[e.platform] : p
+  ).join('').trim()
+}
+
+/** То же, но по кусочкам — сумма отдельным куском (выделяется в оверлее). */
+function parts(tpl: string, e: HubEvent): AlertTitlePart[] {
+  const out: AlertTitlePart[] = []
+  const amount = amountText(e)
+  for (const p of tpl.split(PLACEHOLDER)) {
+    if (!p) continue
+    if (p === '{user}') out.push({ t: 'text', v: e.user })
+    else if (p === '{amount}') { if (amount) out.push({ t: 'amount', v: amount }) }
+    else if (p === '{message}') { if (e.text) out.push({ t: 'text', v: e.text }) }
+    else if (p === '{platform}') out.push({ t: 'text', v: PLATFORM_NAMES[e.platform] })
+    else out.push({ t: 'text', v: p })
+  }
+  return out
+}
+
+interface Entry {
+  item: AlertItem
+  /** Ждёт озвучку: показывать, только когда готово. */
+  ready: boolean
+  event: HubEvent
+}
+
 /**
- * Движок алертов: одна очередь на всё приложение. Оверлеи только показывают то, что пришло
- * (поэтому все открытые копии оверлея синхронны, а пауза/пропуск работают из интерфейса).
+ * Движок алертов: одна очередь на всё приложение. Что показывать, решают правила (rules.ts),
+ * оверлеи только показывают то, что пришло (все открытые копии синхронны, пауза/пропуск — из интерфейса).
+ * Действия OBS из слоёв шаблона выполняет ядро в нужный момент таймлайна.
  * События: 'play' (AlertItem), 'end' (id), 'change'.
  */
 export class AlertEngine extends EventEmitter {
-  private queue: AlertItem[] = []
-  private current: AlertItem | null = null
+  private queue: Entry[] = []
+  private current: Entry | null = null
   private paused = false
   private playTimer: NodeJS.Timeout | null = null
   private gapTimer: NodeJS.Timeout | null = null
+  private obsTimers: NodeJS.Timeout[] = []
 
-  constructor(private hub: Hub, private settings: Settings) {
+  constructor(
+    private hub: Hub,
+    private settings: Settings,
+    private tts: WindowsTts,
+    private runObs: (a: ObsAction, e: HubEvent) => Promise<void>
+  ) {
     super()
-    hub.on('event', (e: HubEvent) => {
-      const a = this.build(e, false)
-      if (a) this.enqueue(a)
-    })
   }
 
   state(): AlertQueueState {
-    return { enabled: this.settings.get().alerts.enabled, paused: this.paused, current: this.current, queue: this.queue.slice(0, 30) }
+    return {
+      enabled: this.settings.get().alerts.enabled,
+      paused: this.paused,
+      current: this.current?.item ?? null,
+      queue: this.queue.slice(0, 30).map((q) => q.item)
+    }
   }
 
-  /** Собрать алерт по событию. force — повтор вручную: игнорирует выключатели и минимальную сумму. */
-  build(e: HubEvent, force: boolean): AlertItem | null {
-    if (!(ALERT_KINDS as readonly string[]).includes(e.type)) return null
-    const kind = e.type as AlertKind
-    const s = this.settings.get().alerts
-    const rule = s.rules[kind]
-    if (!force && (!s.enabled || !rule.enabled)) return null
-    const value = kind === 'donation' ? (e.amountRub ?? (e.currency === 'RUB' ? e.amount : undefined) ?? e.amount ?? 0) : (e.amount ?? 0)
-    if (!force && rule.minAmount > 0 && value < rule.minAmount) return null
-    const tier = kind === 'donation' || kind === 'bits' || kind === 'raid' || kind === 'gift'
-      ? [...rule.tiers].reverse().find((t) => value >= t.from)
-      : undefined
-
-    const amount = amountText(e, kind)
-    const title: AlertTitlePart[] = []
-    for (const piece of rule.title.split(/(\{user\}|\{amount\}|\{platform\})/)) {
-      if (!piece) continue
-      if (piece === '{user}') title.push({ t: 'text', v: e.user })
-      else if (piece === '{amount}') { if (amount) title.push({ t: 'amount', v: amount }) }
-      else if (piece === '{platform}') title.push({ t: 'text', v: PLATFORM_NAMES[e.platform] })
-      else title.push({ t: 'text', v: piece })
+  /** Исполнитель правил: первый шаблон получает озвучку и звуки правил, без шаблона они играют отдельно. */
+  play(plan: RulePlan, e: HubEvent, force: boolean): void {
+    if (!force && !this.settings.get().alerts.enabled) return
+    if (!plan.templates.length) {
+      this.enqueue({ id: 'extras', name: 'Озвучка', theme: 'auto', durationMs: 1500, extendByMessage: false, layers: [] }, e, force, plan.extras)
+      return
     }
-    const text = rule.showMessage && e.text ? e.text : null
-    const soundId = tier?.sound ?? rule.sound
-    const sound = soundId === 'none' ? null : soundId.startsWith('custom:') ? { url: `/s/${soundId.slice(7)}` } : { builtin: soundId }
-    const base = (tier?.durationSec ?? rule.durationSec) * 1000
-    return {
+    plan.templates.forEach((t, i) => this.enqueue(t, e, force, i === 0 ? plan.extras : []))
+  }
+
+  /** Собрать алерт из шаблона и поставить в очередь. */
+  enqueue(t: AlertTemplate, e: HubEvent, force: boolean, extras: Layer[] = []): void {
+    const s = this.settings.get()
+    const master = s.alerts.volume / 100
+    const layers: AlertLayerOut[] = []
+    for (const l of [...t.layers, ...extras]) {
+      if (l.hidden) continue
+      const out: AlertLayerOut = { ...l, keyframes: l.keyframes.map((k) => ({ ...k })) }
+      if (l.type === 'card') {
+        out.parts = parts(l.text, e)
+        out.kickerText = fill(l.kicker, e)
+        out.message = l.showMessage && e.text ? e.text : null
+      } else if (l.type === 'text') {
+        out.parts = parts(l.text, e)
+      } else if (l.type === 'image' || l.type === 'video') {
+        if (!l.media) continue
+        out.src = `/m/${l.media.slice(2)}`
+        out.vol = (l.volume / 100) * master
+      } else if (l.type === 'sound') {
+        if (l.sound === 'none') continue
+        if (l.sound.startsWith('custom:')) out.src = `/s/${l.sound.slice(7)}`
+        else out.builtin = l.sound
+        out.vol = (l.volume / 100) * master
+      } else if (l.type === 'tts') {
+        out.vol = (l.volume / 100) * (s.tts.volume / 100) * master
+      }
+      layers.push(out)
+    }
+    const extra = t.extendByMessage && e.text ? Math.min(e.text.length * 40, 5000) : 0
+    const item: AlertItem = {
       id: randomUUID(),
       eventId: e.id,
-      kind,
+      kind: e.type,
       platform: e.platform,
       user: e.user,
-      kicker: tier?.kicker ?? rule.kicker,
-      title,
-      text,
-      sound,
-      volume: Math.round(rule.volume * s.volume) / 10000,
-      durationMs: base + (text ? Math.min(text.length * 40, 5000) : 0),
+      summary: `${t.name}: ${e.user}${amountText(e) ? ` — ${amountText(e)}` : ''}`,
+      theme: t.theme,
+      durationMs: t.durationMs + extra,
+      layers,
       test: !!e.test,
       replay: force
     }
-  }
-
-  private enqueue(a: AlertItem): void {
-    this.queue.push(a)
+    const entry: Entry = { item, ready: true, event: e }
+    const tts = layers.filter((l) => l.type === 'tts')
+    if (tts.length) {
+      entry.ready = false
+      void this.prepareTts(entry, tts).finally(() => {
+        entry.ready = true
+        this.next()
+      })
+    }
+    this.queue.push(entry)
     if (this.queue.length > QUEUE_LIMIT) this.queue.splice(0, this.queue.length - QUEUE_LIMIT)
     this.emit('change')
     this.next()
   }
 
+  /** Озвучить tts-слои; алерт удлиняется, если голос не успевает договорить. */
+  private async prepareTts(entry: Entry, layers: AlertLayerOut[]): Promise<void> {
+    const s = this.settings.get().tts
+    const e = entry.event
+    for (const l of layers) {
+      try {
+        const msg = cleanForSpeech(e.text ?? '', { stripLinks: s.stripLinks, badWords: s.badWords, maxChars: s.maxChars })
+        const text = cleanForSpeech(fill(l.text, { ...e, user: cleanForSpeech(e.user, { stripLinks: false, badWords: s.badWords, maxChars: 40 }) }, msg, amountSpoken(e)),
+          { stripLinks: false, badWords: '', maxChars: 800 })
+        if (!text) throw new Error('нечего читать')
+        const r = await this.tts.synth(text, l.voice || s.voice, l.rate || s.rate)
+        l.src = `/t/${r.file}`
+        entry.item.durationMs = Math.max(entry.item.durationMs, l.start + r.durationMs + 500)
+      } catch (err) {
+        entry.item.layers = entry.item.layers.filter((x) => x !== l)
+        if ((err as Error).message !== 'нечего читать') this.hub.log('hub', 'warn', `Озвучка не получилась: ${(err as Error).message}`)
+      }
+    }
+  }
+
   private next(): void {
     if (this.current || this.paused || this.gapTimer || !this.queue.length) return
-    const a = this.queue.shift()!
-    this.current = a
-    this.emit('play', a)
+    if (!this.queue[0].ready) return
+    const entry = this.queue.shift()!
+    this.current = entry
+    this.emit('play', entry.item)
     this.emit('change')
-    // +700 мс — анимация появления/исчезновения.
-    this.playTimer = setTimeout(() => this.finish(), a.durationMs + 700)
+    for (const l of entry.item.layers) {
+      if (l.type !== 'obs') continue
+      this.obsTimers.push(setTimeout(() => {
+        this.runObs(l.obs, entry.event).catch((err) => this.hub.log('obs', 'warn', `Алерт не выполнил действие OBS: ${(err as Error).message}`))
+      }, l.start))
+    }
+    // +700 мс — запас на анимацию исчезновения.
+    this.playTimer = setTimeout(() => this.finish(), entry.item.durationMs + 700)
   }
 
   private finish(): void {
     if (this.playTimer) clearTimeout(this.playTimer)
     this.playTimer = null
+    for (const t of this.obsTimers) clearTimeout(t)
+    this.obsTimers = []
     if (!this.current) return
-    this.emit('end', this.current.id)
+    this.emit('end', this.current.item.id)
     this.current = null
     this.emit('change')
     const gap = this.settings.get().alerts.gapSec * 1000 + 400
@@ -164,21 +279,13 @@ export class AlertEngine extends EventEmitter {
     }, gap)
   }
 
-  /** Повторить алерт события из ленты. */
-  replay(eventId: string): boolean {
-    const e = this.hub.recent().find((x) => x.id === eventId)
-    const a = e ? this.build(e, true) : null
-    if (a) this.enqueue(a)
-    return !!a
-  }
-
   skip(): void {
     this.finish()
   }
 
   /** Убрать один алерт из очереди. */
   remove(id: string): void {
-    this.queue = this.queue.filter((a) => a.id !== id)
+    this.queue = this.queue.filter((a) => a.item.id !== id)
     this.emit('change')
   }
 
@@ -197,5 +304,6 @@ export class AlertEngine extends EventEmitter {
   dispose(): void {
     if (this.playTimer) clearTimeout(this.playTimer)
     if (this.gapTimer) clearTimeout(this.gapTimer)
+    for (const t of this.obsTimers) clearTimeout(t)
   }
 }

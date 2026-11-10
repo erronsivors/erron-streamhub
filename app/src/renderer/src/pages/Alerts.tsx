@@ -1,21 +1,12 @@
 import { useEffect, useState } from 'react'
 import type { HubSnapshot } from '../../../main/core/types'
-import type { AlertKind, AlertRule, AlertTier, StatsPeriod } from '../../../main/core/settings'
-import type { AlertItem } from '../../../main/core/alerts'
+import type { StatsPeriod } from '../../../main/core/settings'
 import type { StatsSnapshot } from '../../../main/core/stats'
+import type { AlertTemplate } from '../../../main/core/templates'
 import { Hint, NumberField, Toggle, errText } from '../components'
 import { PlatIcon } from '../ui'
-import { SOUND_LABEL, playBuiltin } from '../sounds'
-
-const KINDS: { id: AlertKind; label: string; amount?: string }[] = [
-  { id: 'donation', label: 'Донат', amount: '₽' },
-  { id: 'sub', label: 'Подписка' },
-  { id: 'gift', label: 'Подарки', amount: 'подписок' },
-  { id: 'follow', label: 'Фоллоу' },
-  { id: 'raid', label: 'Рейд', amount: 'зрителей' },
-  { id: 'bits', label: 'Биты', amount: 'бит' },
-  { id: 'reward', label: 'Баллы' }
-]
+import { AlertEditor, blankTemplate } from './AlertEditor'
+import { OverlayWarning } from './Rules'
 
 const TESTS: { kind: Parameters<typeof window.hub.testEvent>[0]; label: string }[] = [
   { kind: 'donation', label: '₽ Донат' }, { kind: 'bigdonation', label: '₽ Крупный донат' }, { kind: 'sub', label: '★ Подписка' },
@@ -28,13 +19,14 @@ const PERIODS: { id: StatsPeriod; label: string }[] = [
 ]
 
 const rub = (n: number): string => `${Math.round(n).toLocaleString('ru-RU')} ₽`
-const titleText = (a: AlertItem): string => a.title.map((p) => p.v).join('')
 
 export function Alerts({ snap }: { snap: HubSnapshot }) {
   const q = snap.alerts
   const s = snap.settings.alerts
-  const [kind, setKind] = useState<AlertKind>('donation')
+  const [editing, setEditing] = useState<AlertTemplate | null>(null)
   const setAlerts = (patch: Record<string, unknown>): void => void window.hub.setSettings({ alerts: patch })
+
+  if (editing) return <AlertEditor key={editing.id} initial={editing} snap={snap} onClose={() => setEditing(null)} />
 
   return (
     <>
@@ -50,6 +42,7 @@ export function Alerts({ snap }: { snap: HubSnapshot }) {
         </div>
       </div>
 
+      <OverlayWarning snap={snap} />
       <div className="grid" style={{ gridTemplateColumns: 'minmax(0,1.25fr) minmax(0,1fr)' }}>
         <div className="grid" style={{ alignContent: 'start' }}>
           <div className="card">
@@ -58,14 +51,14 @@ export function Alerts({ snap }: { snap: HubSnapshot }) {
             {q.current ? (
               <div className="row">
                 <PlatIcon p={q.current.platform} />
-                <div className="grow"><b className="ellipsis">{q.current.kicker}: {titleText(q.current)}</b><span className="small muted">показывается сейчас{q.current.test ? ' · тест' : ''}</span></div>
+                <div className="grow"><b className="ellipsis">{q.current.summary}</b><span className="small muted">показывается сейчас{q.current.test ? ' · тест' : ''}</span></div>
               </div>
             ) : <p className="muted small">Сейчас ничего не показывается.</p>}
             {q.queue.length > 0 && <div className="list" style={{ marginTop: 8 }}>
               {q.queue.map((a) => (
                 <div key={a.id} className="row">
                   <PlatIcon p={a.platform} />
-                  <div className="grow"><span className="ellipsis">{a.kicker}: {titleText(a)}</span></div>
+                  <div className="grow"><span className="ellipsis">{a.summary}</span></div>
                   <button className="btn sm" title="Убрать из очереди" onClick={() => void window.hub.alertRemove(a.id)}>✕</button>
                 </div>
               ))}
@@ -80,13 +73,7 @@ export function Alerts({ snap }: { snap: HubSnapshot }) {
             </div>
           </div>
 
-          <div className="card">
-            <h3>Шаблоны <Hint id="alertTemplate" /></h3>
-            <div className="seg" style={{ flexWrap: 'wrap', marginBottom: 12 }}>
-              {KINDS.map((k) => <button key={k.id} className={kind === k.id ? 'on' : ''} onClick={() => setKind(k.id)}>{k.label}{!s.rules[k.id].enabled ? ' ·выкл' : ''}</button>)}
-            </div>
-            <RuleEditor key={kind} kind={kind} rule={s.rules[kind]} amount={KINDS.find((k) => k.id === kind)!.amount} snap={snap} masterVolume={s.volume} />
-          </div>
+          <TemplatesCard snap={snap} onEdit={setEditing} />
         </div>
 
         <div className="grid" style={{ alignContent: 'start' }}>
@@ -107,76 +94,38 @@ export function Alerts({ snap }: { snap: HubSnapshot }) {
   )
 }
 
-function SoundSelect({ value, onChange, snap }: { value: string; onChange: (v: string) => void; snap: HubSnapshot }) {
+function TemplatesCard({ snap, onEdit }: { snap: HubSnapshot; onEdit: (t: AlertTemplate) => void }) {
+  const [err, setErr] = useState<string | null>(null)
+  const [del, setDel] = useState<string | null>(null)
+  const wrap = (p: Promise<unknown>): void => { setErr(null); p.catch((e) => setErr(errText(e))) }
+  const usedBy = (id: string): string[] => snap.rules.rules.filter((r) => r.actions.some((a) => a.type === 'alert' && a.templateId === id)).map((r) => r.name)
   return (
-    <select className="input" value={value} onChange={(e) => onChange(e.target.value)}>
-      {Object.entries(SOUND_LABEL).map(([id, l]) => <option key={id} value={id}>{l}</option>)}
-      {snap.sounds.map((x) => <option key={x.id} value={x.id}>Свой: {x.name}</option>)}
-    </select>
-  )
-}
-
-function preview(sound: string, volume: number): void {
-  if (sound.startsWith('custom:')) return
-  playBuiltin(sound, volume)
-}
-
-function RuleEditor({ kind, rule, amount, snap, masterVolume }: { kind: AlertKind; rule: AlertRule; amount?: string; snap: HubSnapshot; masterVolume: number }) {
-  const [kicker, setKicker] = useState(rule.kicker)
-  const [title, setTitle] = useState(rule.title)
-  const set = (patch: Partial<AlertRule>): void => void window.hub.setSettings({ alerts: { rules: { [kind]: patch } } })
-  const setTiers = (tiers: AlertTier[]): void => set({ tiers })
-  const vol = (rule.volume * masterVolume) / 10000
-
-  return (
-    <div>
-      <Toggle on={rule.enabled} onChange={(v) => set({ enabled: v })} label="Алерт для этого события" />
-      <div className="grid g2" style={{ gap: 10, marginTop: 10 }}>
-        <div className="field">
-          <label>Верхняя строка</label>
-          <input className="input" value={kicker} maxLength={60} onChange={(e) => setKicker(e.target.value)} onBlur={() => kicker !== rule.kicker && set({ kicker })} />
-        </div>
-        <div className="field">
-          <label>Главная строка</label>
-          <input className="input" value={title} maxLength={80} onChange={(e) => setTitle(e.target.value)} onBlur={() => title !== rule.title && set({ title })} />
-        </div>
-      </div>
-      <p className="small muted" style={{ marginTop: -4 }}>Подстановки: <code>{'{user}'}</code> — ник, <code>{'{amount}'}</code> — сумма{amount ? ` (${amount})` : ''}, <code>{'{platform}'}</code> — площадка.</p>
-      <div className="grid g3" style={{ gap: 10 }}>
-        <NumberField label="Показывать" value={rule.durationSec} min={2} max={60} suffix="сек" onChange={(v) => set({ durationSec: v })} />
-        {amount && <NumberField label="Минимум" value={rule.minAmount} min={0} max={10000000} suffix={`${amount} (0 — все)`} onChange={(v) => set({ minAmount: v })} />}
-        <NumberField label="Громкость" value={rule.volume} min={0} max={100} suffix="%" onChange={(v) => set({ volume: v })} />
-      </div>
-      <div className="field">
-        <label>Звук <Hint id="alertSound" /></label>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <div style={{ flex: 1 }}><SoundSelect value={rule.sound} onChange={(v) => set({ sound: v })} snap={snap} /></div>
-          <button className="btn sm" disabled={rule.sound === 'none' || rule.sound.startsWith('custom:')} title="Послушать" onClick={() => preview(rule.sound, vol)}>▶</button>
-        </div>
-      </div>
-      {kind !== 'follow' && kind !== 'reward' && <Toggle on={rule.showMessage} onChange={(v) => set({ showMessage: v })} label="Показывать сообщение зрителя" />}
-
-      {amount && (
-        <div style={{ marginTop: 14 }}>
-          <b>Варианты по сумме <Hint id="alertTiers" /></b>
-          {rule.tiers.map((t, i) => (
-            <div key={i} className="grid" style={{ gridTemplateColumns: '110px 1fr 150px 90px 36px', gap: 8, alignItems: 'end', marginTop: 8 }}>
-              <div className="field" style={{ margin: 0 }}><label>От, {amount}</label>
-                <input className="input" type="number" min={1} defaultValue={t.from} onBlur={(e) => setTiers(rule.tiers.map((x, j) => (j === i ? { ...x, from: Number(e.target.value) || 1 } : x)))} /></div>
-              <div className="field" style={{ margin: 0 }}><label>Верхняя строка</label>
-                <input className="input" defaultValue={t.kicker} maxLength={60} onBlur={(e) => setTiers(rule.tiers.map((x, j) => (j === i ? { ...x, kicker: e.target.value } : x)))} /></div>
-              <div className="field" style={{ margin: 0 }}><label>Звук</label>
-                <SoundSelect value={t.sound} snap={snap} onChange={(v) => { setTiers(rule.tiers.map((x, j) => (j === i ? { ...x, sound: v } : x))); preview(v, vol) }} /></div>
-              <div className="field" style={{ margin: 0 }}><label>Сек</label>
-                <input className="input" type="number" min={2} max={60} defaultValue={t.durationSec} onBlur={(e) => setTiers(rule.tiers.map((x, j) => (j === i ? { ...x, durationSec: Number(e.target.value) || 6 } : x)))} /></div>
-              <button className="btn sm" title="Удалить вариант" onClick={() => setTiers(rule.tiers.filter((_, j) => j !== i))}>✕</button>
+    <div className="card">
+      <h3>Шаблоны алертов <Hint id="alertTemplate" /><button className="btn sm primary r" onClick={() => onEdit(blankTemplate())}>+ Новый</button></h3>
+      <p className="small muted" style={{ marginTop: -6 }}>Как выглядит алерт: слои на холсте и таймлайне. Когда какой показывать — решают <b>Правила</b>.</p>
+      <div className="list">{snap.templates.map((t) => {
+        const used = usedBy(t.id)
+        return (
+          <div key={t.id} className="row tplrow">
+            <div className="grow">
+              <b className="ellipsis">{t.name}</b>
+              <span className="small muted ellipsis" style={{ display: 'block' }}>
+                {t.layers.length} сл. · {(t.durationMs / 1000).toFixed(1)} с · {used.length ? `правила: ${used.join(', ')}` : 'не используется в правилах'}
+              </span>
             </div>
-          ))}
-          {rule.tiers.length < 5 && (
-            <button className="btn sm" style={{ marginTop: 8 }} onClick={() => setTiers([...rule.tiers, { from: (rule.tiers.at(-1)?.from ?? 500) * 2, kicker: rule.kicker, sound: rule.sound, durationSec: rule.durationSec }])}>+ Вариант</button>
-          )}
-        </div>
-      )}
+            <div className="tpl-tools">
+            <button className="btn sm" title="Показать в оверлее на тестовом донате" onClick={() => wrap(window.hub.templateTest(t, 'donation'))}>Тест</button>
+            <button className="btn sm" onClick={() => onEdit(structuredClone(t))}>Изменить</button>
+            <button className="btn sm" title="Сделать копию" onClick={() => wrap(window.hub.templateDuplicate(t.id))}>⧉</button>
+            {del === t.id
+              ? <button className="btn sm" style={{ borderColor: '#ff7a84' }} onClick={() => { setDel(null); wrap(window.hub.templateRemove(t.id)) }}>Удалить?</button>
+              : <button className="btn sm" title="Удалить" onClick={() => setDel(t.id)}>✕</button>}
+            </div>
+          </div>
+        )
+      })}</div>
+      {!snap.templates.length && <p className="small muted">Шаблонов нет — создайте первый.</p>}
+      {err && <p className="small" style={{ color: '#ff7a84' }}>{err}</p>}
     </div>
   )
 }
