@@ -1,6 +1,7 @@
 import { createServer, type Server } from 'node:http'
 import { createHash, randomBytes } from 'node:crypto'
 import { join } from 'node:path'
+import { readFileSync } from 'node:fs'
 import { shell } from 'electron'
 import * as grpc from '@grpc/grpc-js'
 import * as protoLoader from '@grpc/proto-loader'
@@ -20,12 +21,15 @@ import type { HubEvent, YoutubeState } from './types'
  * подключение к чату 5 ед., отправка ~20 ед., удаление ~50, бан ~200 — бан только по явному действию.
  *
  * Client secret у «Desktop app»-клиента Google по документации Google НЕ считается секретом
- * (его нельзя спрятать в программе на ПК), поэтому общий хранится в коде; защита — PKCE + state.
+ * (его нельзя спрятать в программе на ПК), но в публичный репозиторий его не кладём (иначе его отзовут); защита входа — PKCE + state.
  */
 
-/** Общий OAuth-клиент Crossember (Desktop app). Пусто — пока не зарегистрирован; можно указать свой в «Для опытных». */
-export const SHARED_CLIENT_ID = ''
-export const SHARED_CLIENT_SECRET = ''
+/**
+ * Общий OAuth-клиент Crossember (Desktop app) — в файле resources/youtube/oauth-client.json
+ * ({ "clientId": "…", "clientSecret": "…" }). Файл не хранится в Git: GitHub и Google автоматически
+ * отзывают ключи, найденные в публичных репозиториях. Нет файла — нужен свой клиент («Для опытных»).
+ */
+const SHARED_FILE = ['youtube', 'oauth-client.json']
 
 const SCOPE = 'https://www.googleapis.com/auth/youtube.force-ssl'
 const AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth'
@@ -73,12 +77,19 @@ export class YoutubeConnector implements ChatConnector {
   private retryDelay = 5000
   private generation = 0
   private unknown = new Set<string>()
+  private shared: { id: string; secret: string } | null = null
   live = false
   viewers: number | null = null
   onChange: () => void = () => undefined
 
   constructor(private hub: Hub, private settings: Settings, private secrets: Secrets, private resourcesDir: string) {
     hub.register('youtube', 'YouTube')
+    try {
+      const c = obj(JSON.parse(readFileSync(join(resourcesDir, ...SHARED_FILE), 'utf8')))
+      if (s(c.clientId).endsWith('.apps.googleusercontent.com')) this.shared = { id: s(c.clientId), secret: s(c.clientSecret) }
+    } catch {
+      /* файла нет — общего входа нет */
+    }
     try {
       const t = JSON.parse(secrets.get(TOKENS_KEY) ?? 'null') as Tokens | null
       if (t?.refresh) this.tokens = t
@@ -92,7 +103,7 @@ export class YoutubeConnector implements ChatConnector {
   private client_(): { id: string; secret: string; source: 'shared' | 'custom' | 'none' } {
     const customId = this.settings.get().youtube.customClientId
     if (customId) return { id: customId, secret: this.secrets.get(CUSTOM_SECRET_KEY) ?? '', source: 'custom' }
-    if (SHARED_CLIENT_ID) return { id: SHARED_CLIENT_ID, secret: SHARED_CLIENT_SECRET, source: 'shared' }
+    if (this.shared) return { ...this.shared, source: 'shared' }
     return { id: '', secret: '', source: 'none' }
   }
 
