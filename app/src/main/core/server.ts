@@ -17,6 +17,7 @@ import type { WindowsTts } from './tts'
 import type { Counter, Counters } from './counters'
 import type { Auction } from './auction'
 import type { Wheel } from './wheel'
+import type { Fundraiser } from './goal'
 
 /** Оверлеи для OBS. id = имя файла в resources/overlays, key = ключ настроек. */
 const OVERLAYS = [
@@ -29,6 +30,7 @@ const OVERLAYS = [
   { id: 'counter', key: 'counter', name: 'Счётчики', size: '600 × 300' },
   { id: 'auction', key: 'auction', name: 'Аукцион', size: '700 × 500' },
   { id: 'wheel', key: 'wheel', name: 'Колесо', size: '900 × 900' },
+  { id: 'goal', key: 'goal', name: 'Сбор средств', size: '800 × 260' },
   // Окно «чат поверх игры» — открывается самим Crossember, в списке для OBS не показывается.
   { id: 'float', key: 'float', name: 'Чат поверх игры', size: '', hidden: true }
 ] as { id: string; key: string; name: string; size: string; hidden?: boolean }[]
@@ -48,6 +50,7 @@ const ASSETS: Record<string, string> = {
   'counter.js': 'text/javascript; charset=utf-8',
   'auction.js': 'text/javascript; charset=utf-8',
   'wheel.js': 'text/javascript; charset=utf-8',
+  'goal.js': 'text/javascript; charset=utf-8',
   'sounds.js': 'text/javascript; charset=utf-8'
 }
 
@@ -103,6 +106,7 @@ export interface OverlayExtras {
   counters: Counters
   auction: Auction
   wheel: Wheel
+  goal: Fundraiser
 }
 
 export interface RemoteActions {
@@ -158,6 +162,7 @@ export class OverlayServer {
     extras.counters.on('change', (list: Counter[]) => this.broadcast({ kind: 'counters', counters: list }, 'local'))
     extras.auction.on('change', () => this.broadcast({ kind: 'auction', auction: extras.auction.overlay() }, 'local'))
     extras.wheel.on('change', () => this.broadcast({ kind: 'wheel', wheel: extras.wheel.overlay() }, 'local'))
+    extras.goal.on('change', () => this.broadcast({ kind: 'goal', goal: extras.goal.overlay() }, 'local'))
     hub.on('event', (e: HubEvent) => {
       if (e.type !== 'message' && e.type !== 'system' && !e.test) this.pushStats()
     })
@@ -237,7 +242,7 @@ export class OverlayServer {
       chat: this.hub.recentChat().slice(0, 50),
       events: kind === 'lan' ? this.hub.recent().slice(0, 30) : [],
       pinned: this.hub.pinned,
-      ...(kind === 'local' ? { stats: this.statsData(), counters: this.extras.counters.list(), auction: this.extras.auction.overlay(), wheel: this.extras.wheel.overlay() } : {}),
+      ...(kind === 'local' ? { stats: this.statsData(), counters: this.extras.counters.list(), auction: this.extras.auction.overlay(), wheel: this.extras.wheel.overlay(), goal: this.extras.goal.overlay() } : {}),
       // Снимок для оверлея алертов после (пере)подключения: что идёт сейчас и с какого момента.
       ...(ov === 'alert' ? { alert: this.extras.alerts.nowPlaying() } : {})
     })

@@ -12,7 +12,8 @@ export const TRIGGERS: { id: TriggerType; label: string; ico: string; service?: 
   { id: 'follow', label: 'Фоллоу', ico: '♥' }, { id: 'raid', label: 'Рейд', ico: '↗' }, { id: 'bits', label: 'Биты', ico: '◆' },
   { id: 'reward', label: 'Баллы', ico: '✦' }, { id: 'message', label: 'Сообщение в чате', ico: '💬' },
   { id: 'stream_start', label: 'Эфир начался', ico: '▶', service: true }, { id: 'stream_end', label: 'Эфир закончился', ico: '■', service: true },
-  { id: 'timer', label: 'Каждые N минут', ico: '⏱', service: true }, { id: 'hotkey', label: 'Горячая клавиша', ico: '⌨', service: true }
+  { id: 'timer', label: 'Каждые N минут', ico: '⏱', service: true }, { id: 'hotkey', label: 'Горячая клавиша', ico: '⌨', service: true },
+  { id: 'goal_stage', label: 'Сбор: этап достигнут', ico: '◔', service: true }, { id: 'goal_done', label: 'Сбор: цель достигнута', ico: '●', service: true }
 ]
 const isService = (t: TriggerType): boolean => !!TRIGGERS.find((x) => x.id === t)?.service
 const PLATFORMS: { id: Platform; label: string }[] = [
@@ -284,7 +285,7 @@ function RuleEditor({ rule, snap, onClose }: { rule: Rule; snap: HubSnapshot; on
         <div className="chips big">
           {TRIGGERS.filter((x) => !x.service).map((x) => <button key={x.id} className={r.types.includes(x.id) ? 'on' : ''} onClick={() => toggleType(x.id)}><i>{x.ico}</i>{x.label}</button>)}
         </div>
-        <div className="chips-label">Эфир и управление</div>
+        <div className="chips-label">Эфир, управление и сбор средств</div>
         <div className="chips big">
           {TRIGGERS.filter((x) => x.service).map((x) => <button key={x.id} className={r.types.includes(x.id) ? 'on' : ''} onClick={() => toggleType(x.id)}><i>{x.ico}</i>{x.label}</button>)}
         </div>
@@ -299,6 +300,9 @@ function RuleEditor({ rule, snap, onClose }: { rule: Rule; snap: HubSnapshot; on
             <span>Сочетание</span><HotkeyInput value={r.hotkey} onChange={(v) => set({ hotkey: v })} />
             {keyErr && <span className="tag warn">{keyErr}</span>}
           </div>
+        )}
+        {(r.types.includes('goal_stage') || r.types.includes('goal_done')) && (
+          <p className="small muted" style={{ margin: '0 0 10px' }}>Срабатывает один раз на этап или цель из раздела «Сбор средств». В тексте: {'{user}'} — название этапа или цели, {'{amount}'} — собрано всего, {'{message}'} — «Собрано X из Y».</p>
         )}
         {(r.types.includes('stream_start') || r.types.includes('stream_end')) && (
           <p className="small muted" style={{ margin: '0 0 10px' }}>Начало и конец эфира Crossember узнаёт от OBS — он должен быть подключён (раздел «Подключения»).</p>
@@ -337,7 +341,7 @@ function RuleEditor({ rule, snap, onClose }: { rule: Rule; snap: HubSnapshot; on
           {!showText && <button className="linkbtn" onClick={() => setShowText(true)}>+ слово в тексте</button>}
           {!showUsers && <button className="linkbtn" onClick={() => setShowUsers(true)}>+ только определённые ники</button>}
         </div>
-        {r.types.some(isService) && <p className="small muted" style={{ margin: '4px 0 0' }}>Условия относятся только к событиям зрителей; эфир, таймер и клавиша срабатывают без них.</p>}
+        {r.types.some(isService) && <p className="small muted" style={{ margin: '4px 0 0' }}>Условия относятся только к событиям зрителей; эфир, таймер, клавиша и сбор средств срабатывают без них.</p>}
       </Step>}
 
       <Step n={hasViewer ? 3 : 2} title="Тогда">

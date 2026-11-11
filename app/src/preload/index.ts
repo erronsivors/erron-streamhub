@@ -9,6 +9,7 @@ import type { Rule } from '../main/core/rules'
 import type { Counter } from '../main/core/counters'
 import type { AuctionBet, AuctionLot, AuctionState } from '../main/core/auction'
 import type { WheelItem } from '../main/core/wheel'
+import type { GoalInput } from '../main/core/goal'
 import type { ProfilePart, ProfileSummary } from '../main/core/profile'
 import type { ObsCatalog } from '../main/core/obs'
 import type { TtsVoice } from '../main/core/tts'
@@ -79,6 +80,15 @@ const api = {
   wheelSpin: () => call('hub:wheelSpin'),
   wheelRestart: () => call('hub:wheelRestart'),
   wheelClearHistory: () => call('hub:wheelClearHistory'),
+  goalStart: (v: GoalInput) => call('hub:goalStart', v),
+  goalEdit: (v: GoalInput) => call('hub:goalEdit', v),
+  goalFinish: () => call('hub:goalFinish'),
+  goalAccepting: (on: boolean) => call('hub:goalAccepting', on),
+  goalDuration: (min: number) => call('hub:goalDuration', min),
+  goalExtend: (min: number) => call('hub:goalExtend', min),
+  goalAdd: (rub: number, note?: string) => call('hub:goalAdd', rub, note),
+  goalToggleGift: (id: string) => call('hub:goalToggleGift', id),
+  goalClearArchive: () => call('hub:goalClearArchive'),
   templatePut: (t: AlertTemplate) => call<AlertTemplate>('hub:templatePut', t),
   templateRemove: (id: string) => call('hub:templateRemove', id),
   templateDuplicate: (id: string) => call<AlertTemplate | null>('hub:templateDuplicate', id),

@@ -129,11 +129,26 @@ export interface AppSettings {
     auction: { theme: Theme; fontSize: number; count: number; show: 'sum' | 'pct' | 'both'; showTimer: boolean }
     /** Колесо: через сколько секунд после итога скрыть (0 — не скрывать). */
     wheel: { theme: Theme; hideAfterSec: number }
+    /** Сбор средств: что показывать под полоской. */
+    goal: GoalOverlaySettings
   }
   float: FloatChatSettings
   auction: AuctionSettings
   /** Колесо: режим, как считать сектора, длительность прокрутки. */
   wheel: { mode: 'normal' | 'elim'; weighting: 'weight' | 'equal'; durationSec: number }
+}
+
+/** Оверлей «Сбор средств» (цель и донаты хранятся отдельно, в goal.v1). */
+export interface GoalOverlaySettings {
+  theme: Theme
+  fontSize: number
+  showStages: boolean
+  showLast: boolean
+  showTop: boolean
+  topCount: number
+  showTimer: boolean
+  /** Праздник при достижении этапа или цели. */
+  celebrate: boolean
 }
 
 /** Правила аукциона (лоты и ставки хранятся отдельно, в auction.v1). */
@@ -209,7 +224,8 @@ export const DEFAULTS: AppSettings = {
     last: { theme: 'general', fontSize: 26, showSub: true },
     counter: { theme: 'general', fontSize: 30, ids: [], layout: 'column' },
     auction: { theme: 'general', fontSize: 24, count: 5, show: 'both', showTimer: true },
-    wheel: { theme: 'general', hideAfterSec: 10 }
+    wheel: { theme: 'general', hideAfterSec: 10 },
+    goal: { theme: 'general', fontSize: 24, showStages: true, showLast: true, showTop: false, topCount: 3, showTimer: true, celebrate: true }
   },
   float: { ...chatDefaults(false), fontSize: 18, maxMessages: 12, hideAfterSec: 45, showStatus: true, enabled: false, bgOpacity: 55, bounds: null },
   auction: { pointsReward: '', pointsPerRub: 100, autoLotMin: 300, extend: true, extendBelowSec: 60, extendAddSec: 30, defaultMin: 10 },
@@ -382,6 +398,15 @@ export function sanitize(input: unknown, base: AppSettings = DEFAULTS): AppSetti
         const o = obj(ov.wheel)
         const b = base.overlays.wheel ?? DEFAULTS.overlays.wheel
         return { theme: theme(o.theme, b.theme), hideAfterSec: int(o.hideAfterSec, b.hideAfterSec, 0, 600) }
+      })(),
+      goal: (() => {
+        const o = obj(ov.goal)
+        const b = base.overlays.goal ?? DEFAULTS.overlays.goal
+        return {
+          theme: theme(o.theme, b.theme), fontSize: int(o.fontSize, b.fontSize, 12, 72), showStages: bool(o.showStages, b.showStages),
+          showLast: bool(o.showLast, b.showLast), showTop: bool(o.showTop, b.showTop), topCount: int(o.topCount, b.topCount, 1, 5),
+          showTimer: bool(o.showTimer, b.showTimer), celebrate: bool(o.celebrate, b.celebrate)
+        }
       })()
     },
     float: float(i.float, base.float ?? DEFAULTS.float),

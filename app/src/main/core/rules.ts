@@ -16,12 +16,12 @@ import {
  * Правила проверяются сверху вниз; «стоп» — следующие правила для этого события не проверяются.
  */
 
-export const TRIGGER_TYPES = ['donation', 'sub', 'gift', 'follow', 'raid', 'bits', 'reward', 'message', 'stream_start', 'stream_end', 'timer', 'hotkey'] as const
+export const TRIGGER_TYPES = ['donation', 'sub', 'gift', 'follow', 'raid', 'bits', 'reward', 'message', 'stream_start', 'stream_end', 'timer', 'hotkey', 'goal_stage', 'goal_done'] as const
 export type TriggerType = (typeof TRIGGER_TYPES)[number]
-/** Служебные поводы: не события зрителей, а эфир, таймер и горячая клавиша. Условия и площадки к ним не применяются. */
-export const SERVICE_TRIGGERS = ['stream_start', 'stream_end', 'timer', 'hotkey'] as const
+/** Служебные поводы: не события зрителей, а эфир, таймер, горячая клавиша и сбор средств. Условия и площадки к ним не применяются. */
+export const SERVICE_TRIGGERS = ['stream_start', 'stream_end', 'timer', 'hotkey', 'goal_stage', 'goal_done'] as const
 export type ServiceTrigger = (typeof SERVICE_TRIGGERS)[number]
-const SERVICE_USER: Record<ServiceTrigger, string> = { stream_start: 'Эфир начался', stream_end: 'Эфир закончился', timer: 'Таймер', hotkey: 'Горячая клавиша' }
+const SERVICE_USER: Record<ServiceTrigger, string> = { stream_start: 'Эфир начался', stream_end: 'Эфир закончился', timer: 'Таймер', hotkey: 'Горячая клавиша', goal_stage: 'Сбор: этап', goal_done: 'Сбор: цель' }
 /** Горячая клавиша: Ctrl/Alt/Shift + буква, цифра, F1–F24 или цифра доп. клавиатуры; без модификатора — только F-клавиши. */
 export const HOTKEY_RE = /^(?:(?:Ctrl|Alt|Shift)\+){1,3}(?:[A-Z0-9]|F(?:[1-9]|1\d|2[0-4])|num[0-9])$|^F(?:[1-9]|1\d|2[0-4])$/
 const PLATFORMS: Platform[] = ['twitch', 'youtube', 'vk', 'kick', 'goodgame', 'donationalerts', 'donatepay', 'donatex', 'boosty', 'hub']
@@ -300,6 +300,15 @@ export class RuleEngine extends EventEmitter {
   /** Эфир начался / закончился: все подходящие правила сверху вниз (со «стоп» и кулдауном). */
   fireService(kind: 'stream_start' | 'stream_end'): void {
     this.process(this.serviceEvent(kind), (r) => r.types.includes(kind), kind)
+  }
+
+  /**
+   * Сбор средств: этап или цель достигнуты. В тексте алерта/озвучки: {user} — название этапа или цели,
+   * {amount} — сколько собрано всего, {message} — «Собрано X из Y».
+   */
+  fireGoal(kind: 'goal_stage' | 'goal_done', name: string, collected: number, message: string): void {
+    const e: HubEvent = { ...this.serviceEvent(kind), user: name || SERVICE_USER[kind], amount: collected, currency: 'RUB', amountRub: collected, text: message }
+    this.process(e, (r) => r.types.includes(kind), kind)
   }
 
   /** Таймер или горячая клавиша конкретного правила. */

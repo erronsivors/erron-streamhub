@@ -18,6 +18,7 @@ import { AlertEngine, fill, setVarsSource } from './core/alerts'
 import { Counters } from './core/counters'
 import { Auction } from './core/auction'
 import { Wheel } from './core/wheel'
+import { Fundraiser, type GoalReached } from './core/goal'
 import { Profiles, type ProfilePart } from './core/profile'
 import { KickAuth } from './core/kickauth'
 import { StreamInfo, INFO_PLATFORMS, type InfoPlatform } from './core/streaminfo'
@@ -62,6 +63,7 @@ let rules: RuleEngine
 let counters: Counters
 let auction: Auction
 let wheel: Wheel
+let goal: Fundraiser
 let profiles: Profiles
 let kickAuth: KickAuth
 let streamInfo: StreamInfo
@@ -96,6 +98,7 @@ function snapshot(): HubSnapshot {
     kickAuth: kickAuth.state(),
     auction: auction.state(),
     wheel: wheel.state(),
+    goal: goal.state(),
     alertOverlays: server ? server.openCount('alert') : 0,
     float: { open: floatChat?.isOpen ?? false, editing: floatChat?.isEditing ?? false, hotkey: FLOAT_HOTKEY.replace('CommandOrControl', 'Ctrl') }
   }
@@ -139,6 +142,8 @@ const SAMPLES: Record<string, Omit<HubEvent, 'id' | 'ts'>> = {
   gift: { platform: 'twitch', type: 'gift', user: 'santa_claws', amount: 5, test: true },
   bits: { platform: 'twitch', type: 'bits', user: 'bit_master', amount: 300, text: 'Держи биты!', test: true },
   reward: { platform: 'twitch', type: 'reward', user: 'lucky_cat', text: 'Спой песню', test: true },
+  goal_stage: { platform: 'hub', type: 'system', user: 'Играю в хоррор', amount: 5000, currency: 'RUB', amountRub: 5000, text: 'Собрано 5 000 ₽ из 10 000 ₽', test: true },
+  goal_done: { platform: 'hub', type: 'system', user: 'Новая камера', amount: 10000, currency: 'RUB', amountRub: 10000, text: 'Собрано 10 000 ₽ из 10 000 ₽', test: true },
   boosty: { platform: 'boosty', type: 'sub', user: 'Верный подписчик', amount: 300, currency: 'RUB', text: 'Уровень «Костёр»', test: true },
   message: { platform: 'twitch', type: 'message', user: 'test_viewer', userId: 'test', text: 'Тестовое сообщение: всем привет у костра! 🔥', parts: [{ t: 'text', v: 'Тестовое сообщение: всем привет у костра! 🔥' }], color: '#ffb27a', test: true }
 }
@@ -239,6 +244,8 @@ app.whenReady().then(async () => {
   wheel.on('change', pushUpdate)
   // Колесо крутили по лотам аукциона — победитель колеса становится победителем аукциона.
   wheel.on('winner', (it: { lotId?: string }) => { if (it.lotId) auction.setWinner(it.lotId) })
+  goal = new Fundraiser(store, hub)
+  goal.on('change', pushUpdate)
   rules = new RuleEngine(hub, store, settings, templates, {
     play: (plan, e, force) => alerts.play(plan, e, force),
     obs: runObs,
@@ -246,6 +253,11 @@ app.whenReady().then(async () => {
   }, counters)
   rules.on('change', () => { syncHotkeys(); pushUpdate() })
   obs.onStream = (live) => rules.fireService(live ? 'stream_start' : 'stream_end')
+  // Сбор средств: этап или цель достигнуты — повод для правил (алерт, звук, озвучка).
+  goal.on('reached', (r: GoalReached) => {
+    const rub = (n: number): string => `${Math.round(n).toLocaleString('ru-RU')} ₽`
+    rules.fireGoal(r.kind === 'goal' ? 'goal_done' : 'goal_stage', r.name, r.collected, `Собрано ${rub(r.collected)} из ${rub(r.target)}`)
+  })
   profiles = new Profiles(app.getPath('userData'), store, settings, rules, templates, counters)
   syncHotkeys()
   stats = new Stats(store, () => (obs.state.streaming ? obs.state.streamStartedAt : null))
@@ -263,7 +275,7 @@ app.whenReady().then(async () => {
   server = new OverlayServer(hub, store, settings, images, resourcesDir, app.getAppPath(), {
     send: (text) => chats.send(text, chats.states().filter((p) => p.canSend).map((p) => p.id), 'broadcaster'),
     pin: (id) => hub.togglePin(id)
-  }, { alerts, stats, sounds, media, tts, counters, auction, wheel })
+  }, { alerts, stats, sounds, media, tts, counters, auction, wheel, goal })
   obs.onChange = pushUpdate
   server.onClients = pushUpdate
   floatChat = new FloatChat(settings, hub, () => server.overlayUrl('float'))
@@ -406,6 +418,16 @@ app.whenReady().then(async () => {
   handle('hub:wheelSpin', () => { wheel.spin() })
   handle('hub:wheelRestart', () => wheel.restart())
   handle('hub:wheelClearHistory', () => wheel.clearHistory())
+  // ---------- Сбор средств ----------
+  handle('hub:goalStart', (v) => { goal.start(v) })
+  handle('hub:goalEdit', (v) => goal.edit(v))
+  handle('hub:goalFinish', () => goal.finish())
+  handle('hub:goalAccepting', (v) => goal.setAccepting(v === true))
+  handle('hub:goalDuration', (min) => goal.setDuration(min))
+  handle('hub:goalExtend', (min) => goal.extend(min))
+  handle('hub:goalAdd', (rub, note) => { goal.addHand(rub, typeof note === 'string' ? str(note, 300) : '') })
+  handle('hub:goalToggleGift', (id) => goal.toggleGift(str(id, 100)))
+  handle('hub:goalClearArchive', () => goal.clearArchive())
   // ---------- Шаблоны алертов (конструктор) ----------
   handle('hub:templatePut', (t) => templates.put(t))
   handle('hub:templateRemove', (id) => {
@@ -543,6 +565,7 @@ app.on('before-quit', () => {
   rules?.dispose()
   auction?.stop()
   wheel?.stop()
+  goal?.stop()
   kickAuth?.cancelLogin()
   floatChat?.close()
   chats.stopAll()
