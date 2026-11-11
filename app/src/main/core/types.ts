@@ -92,6 +92,8 @@ export interface ServerInfo {
   port: number
   baseUrl: string
   overlays: OverlayInfo[]
+  /** Ссылка на док для OBS (свой ключ, с кнопками управления). */
+  dockUrl: string
   /** Ключ оверлеев: редактор алертов берёт по нему картинки, видео и озвучку для предпросмотра. */
   overlayKey: string
   lan: { running: boolean; url: string | null; error: string | null; addresses: string[] }

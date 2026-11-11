@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Crossember · Док</title>
+<link rel="stylesheet" href="/a/overlay.css">
+<style>
+  /* Док: спокойная тёмная панель в тон OBS. Сплошные цвета, без градиентов. */
+  html, body { width: 100%; height: 100%; overflow: hidden; }
+  body {
+    --bg: #15151a; --panel: #1c1c23; --raise: #24242d; --line: rgba(255,255,255,.08); --fg: #ececf1; --muted: #9a9aa8;
+    --accent: #8e7dff; --ok: #3ccf8e; --warn: #f2b84b; --bad: #ff6b75; --fs: 13px;
+    background: var(--bg); color: var(--fg); font: 600 13px/1.4 'Manrope', system-ui, sans-serif;
+    display: grid; grid-template-rows: auto auto 1fr; min-height: 0;
+  }
+  button, input { font: inherit; color: inherit; }
+  header { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--line); min-width: 0; }
+  header b { font-weight: 800; letter-spacing: .02em; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none; }
+  .dot.on { background: var(--ok); } .dot.off { background: var(--bad); }
+  #st { color: var(--muted); font-size: 12px; margin-left: auto; white-space: nowrap; }
+  #now { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+  #now b { color: var(--fg); }
+
+  nav { display: flex; gap: 2px; padding: 6px 8px 0; border-bottom: 1px solid var(--line); }
+  [hidden] { display: none !important; }
+  nav button { background: none; border: 0; padding: 7px 12px 8px; color: var(--muted); cursor: pointer; border-bottom: 2px solid transparent; font-weight: 800; }
+  nav button.on { color: var(--fg); border-bottom-color: var(--accent); }
+  nav button .n { display: inline-block; min-width: 16px; padding: 0 5px; margin-left: 5px; border-radius: 8px; background: var(--raise); color: var(--fg); font-size: 11px; }
+
+  main { display: grid; min-height: 0; }
+  .group { display: none; min-height: 0; overflow-y: auto; }
+  .group.on { display: block; }
+  .group.chatg.on { display: grid; grid-template-rows: 1fr auto auto; overflow: hidden; }
+  body.wide main { grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); }
+  body.wide nav { display: none; }
+  body.wide .group { display: block; border-left: 1px solid var(--line); }
+  body.wide .group.chatg { display: grid; grid-template-rows: 1fr auto auto; overflow: hidden; }
+  body.wide .group:first-child { border-left: 0; }
+
+  .sec { padding: 10px 12px; border-bottom: 1px solid var(--line); }
+  .sec h3 { margin: 0 0 8px; font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); display: flex; align-items: center; gap: 8px; }
+  .sec h3 .r { margin-left: auto; letter-spacing: 0; text-transform: none; font-size: 12px; }
+  .muted { color: var(--muted); }
+  .small { font-size: 12px; }
+  .row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .row + .row { margin-top: 6px; }
+  .grow { flex: 1; min-width: 0; }
+  .ell { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  .b { background: var(--raise); border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; cursor: pointer; font-weight: 800; white-space: nowrap; }
+  .b:hover { border-color: rgba(255,255,255,.2); }
+  .b:active { transform: translateY(1px); }
+  .b.pri { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .b.on { border-color: var(--accent); color: #fff; box-shadow: inset 0 0 0 1px var(--accent); }
+  .b.ask { background: var(--bad); border-color: var(--bad); color: #fff; }
+  .b.sm { padding: 3px 8px; font-size: 12px; }
+  .b.ic { width: 30px; padding: 4px 0; text-align: center; }
+  .b:disabled { opacity: .4; cursor: default; transform: none; }
+
+  .big { font-size: 22px; font-weight: 800; font-variant-numeric: tabular-nums; letter-spacing: .02em; }
+  .tag { font-size: 11px; padding: 2px 7px; border-radius: 6px; background: var(--raise); color: var(--muted); white-space: nowrap; }
+  .tag.ok { color: var(--ok); } .tag.warn { color: var(--warn); } .tag.bad { color: var(--bad); }
+  .bar { height: 6px; border-radius: 3px; background: var(--raise); overflow: hidden; margin: 8px 0 4px; }
+  .bar i { display: block; height: 100%; background: var(--accent); border-radius: 3px; }
+  .list { display: flex; flex-direction: column; gap: 2px; margin-top: 8px; }
+  .li { display: flex; align-items: center; gap: 8px; padding: 4px 6px; border-radius: 6px; background: var(--panel); min-width: 0; }
+  .li .v { margin-left: auto; font-variant-numeric: tabular-nums; color: var(--muted); white-space: nowrap; }
+  .li s { color: var(--muted); }
+  .cnt { font-size: 16px; font-weight: 800; min-width: 42px; text-align: center; font-variant-numeric: tabular-nums; }
+  .num { width: 84px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 5px 8px; outline: none; }
+  .num:focus, #t:focus { border-color: var(--accent); }
+
+  #chat { overflow-y: auto; padding: 8px 10px; display: flex; flex-direction: column; gap: 2px; min-height: 0; }
+  .msg { padding: 3px 6px; border-radius: 6px; cursor: pointer; overflow-wrap: anywhere; font-size: 13px; }
+  .msg:hover { background: rgba(255,255,255,.05); }
+  .msg.pinned { box-shadow: inset 2px 0 0 var(--accent); background: rgba(142,125,255,.10); }
+  .msg .name { margin-right: 0; }
+  .sep { color: var(--muted); }
+  .chint { padding: 0 12px 4px; font-size: 11px; color: var(--muted); }
+  form { display: flex; gap: 6px; padding: 8px 10px; border-top: 1px solid var(--line); }
+  #t { flex: 1; min-width: 0; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 7px 10px; outline: none; }
+  .ev { padding: 6px 8px; border-radius: 6px; background: var(--panel); margin-top: 4px; overflow-wrap: anywhere; }
+  .ev small { display: block; color: var(--muted); }
+
+  #toast { position: fixed; left: 10px; right: 10px; bottom: 10px; padding: 8px 12px; border-radius: 8px; background: #3a1d22; color: #ffd2d6; border: 1px solid #6b2a33; font-size: 12px; display: none; }
+  #toast.show { display: block; }
+  .empty { padding: 24px 16px; text-align: center; color: var(--muted); }
+</style></head>
+<body>
+  <header><span class="dot" id="dot"></span><b>Crossember</b><span id="now"></span><span id="st">подключение…</span></header>
+  <nav id="tabs"></nav>
+  <main id="main"></main>
+  <div id="toast"></div>
+<script src="/a/overlay.js"></script><script src="/a/dock.js"></script>
+</body></html>

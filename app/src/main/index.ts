@@ -297,7 +297,31 @@ app.whenReady().then(async () => {
 
   server = new OverlayServer(hub, store, settings, images, resourcesDir, app.getAppPath(), {
     send: (text) => chats.send(text, chats.states().filter((p) => p.canSend).map((p) => p.id), 'broadcaster'),
-    pin: (id) => hub.togglePin(id)
+    pin: (id) => hub.togglePin(id),
+    // Кнопки дока (OBS и второе устройство): те же действия, что в разделах приложения, — только этот список.
+    dock: {
+      'alerts.pause': (v) => alerts.setPaused(v === true),
+      'alerts.skip': () => alerts.skip(),
+      'alerts.stopAll': () => alerts.stopAll(),
+      'alerts.remove': (id) => alerts.remove(str(id, 100)),
+      test: (kind) => {
+        const x = SAMPLES[String(kind)]
+        if (x) hub.push(x)
+      },
+      'auction.timer': (op, sec) => auction.timer(str(op, 10), sec),
+      'auction.accepting': (v) => auction.setAccepting(v === true),
+      'auction.finish': () => { auction.finish() },
+      'goal.accepting': (v) => goal.setAccepting(v === true),
+      'goal.extend': (min) => goal.extend(min),
+      'goal.add': (rub) => { goal.addHand(rub, 'из дока') },
+      'giveaway.start': () => giveaway.start('', settings.get().giveaway.defaultMin),
+      'giveaway.extend': (min) => giveaway.extend(min),
+      'giveaway.close': () => giveaway.close(false),
+      'giveaway.draw': () => giveaway.draw(settings.get().giveaway.winners),
+      'giveaway.reroll': (key) => giveaway.reroll(str(key, 100)),
+      'wheel.spin': () => { wheel.spin() },
+      counter: (id, op) => counters.apply(str(id, 100), op === 'sub' ? 'sub' : 'add', 1)
+    }
   }, { alerts, stats, sounds, media, tts, counters, auction, wheel, goal, giveaway })
   obs.onChange = pushUpdate
   server.onClients = pushUpdate
@@ -328,7 +352,7 @@ app.whenReady().then(async () => {
   handle('hub:obsConfigure', (url, password) => obs.configure(str(url, 200).trim(), password === undefined ? undefined : str(password, 200)))
   handle('hub:obsReconnect', () => obs.reconnect())
   handle('hub:rotateKey', (which) => {
-    server.rotate(which === 'remote' ? 'remote' : 'overlay')
+    server.rotate(which === 'remote' ? 'remote' : which === 'dock' ? 'dock' : 'overlay')
     pushUpdate()
   })
   handle('hub:copy', (text) => clipboard.writeText(str(text, 2000)))

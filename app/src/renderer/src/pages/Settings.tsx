@@ -58,6 +58,8 @@ export function Settings({ snap }: { snap: HubSnapshot }) {
             </div>
             <NumberField label="Порт" value={s.lan.port} min={1024} max={65535} onChange={(v) => void window.hub.setSettings({ lan: { port: v } })} />
             <Toggle on={s.lan.enabled} onChange={(v) => void window.hub.setSettings({ lan: { enabled: v } })} label="Открыть чат для другого устройства" />
+            <Toggle on={s.lan.control} onChange={(v) => void window.hub.setSettings({ lan: { control: v } })} label="Разрешить там кнопки дока (алерты, аукцион, сбор, розыгрыш…)" />
+            {s.lan.control && <p className="small muted" style={{ margin: '2px 0 0' }}>На устройстве откроется тот же набор блоков, что выбран в «Оверлеи → Док для OBS». Выключено — только чат и события.</p>}
             {lan?.error && <div className="note warnbox" style={{ marginTop: 10 }}>{lan.error}</div>}
             {lan?.running && lan.url && (
               <div style={{ marginTop: 12 }}>
@@ -175,7 +177,7 @@ function ProfileCard({ snap }: { snap: HubSnapshot }) {
   )
 }
 
-function KeyRotate({ label, confirm, onAsk, onCancel, onYes }: { label: string; confirm: boolean; onAsk: () => void; onCancel: () => void; onYes: () => void }) {
+export function KeyRotate({ label, confirm, onAsk, onCancel, onYes }: { label: string; confirm: boolean; onAsk: () => void; onCancel: () => void; onYes: () => void }) {
   if (!confirm) return <button className="btn sm" onClick={onAsk}>{label}</button>
   return (
     <div>

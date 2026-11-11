@@ -2,6 +2,8 @@ import { useState } from 'react'
 import type { HubSnapshot, OverlayInfo } from '../../../main/core/types'
 import type { AppSettings, ChatOverlaySettings, StatsPeriod, Theme } from '../../../main/core/settings'
 import { Hint, NumberField, ThemePicker, Toggle } from '../components'
+import { DOCK_BLOCKS, DOCK_PRESETS, type DockBlock } from '../../../main/core/dock'
+import { KeyRotate } from './Settings'
 
 type Key = keyof AppSettings['overlays']
 const KEY: Record<string, Key> = { alert: 'alert', chat: 'chat', 'chat-h': 'chatH', pinned: 'pinned', top: 'top', last: 'last', counter: 'counter', auction: 'auction', wheel: 'wheel', goal: 'goal', giveaway: 'giveaway' }
@@ -33,14 +35,73 @@ export function Overlays({ snap }: { snap: HubSnapshot }) {
         </div>
       </div>
       {!snap.server ? <div className="note warnbox">Сервер оверлеев не запущен — смотрите «Подключения».</div> : (
+        <>
+        <DockCard snap={snap} url={snap.server.dockUrl} />
         <div className="grid g2">
           {snap.server.overlays.map((o) => <OverlayCard key={o.id} o={o} snap={snap} />)}
         </div>
+        </>
       )}
       <div className="note" style={{ marginTop: 18 }}>
         🔒 В ссылках есть ключ доступа. Если ссылка засветилась — «Настройки → Ключ оверлеев → Перевыпустить».
       </div>
     </>
+  )
+}
+
+const BLOCK_NAMES: Record<DockBlock, string> = {
+  chat: 'Чат', events: 'События', alerts: 'Алерты', auction: 'Аукцион', goal: 'Сбор средств', giveaway: 'Розыгрыш', wheel: 'Колесо', counters: 'Счётчики'
+}
+const BLOCK_DESC: Record<DockBlock, string> = {
+  chat: 'читать, писать, закреплять', events: 'донаты, подписки, рейды', alerts: 'очередь, пауза, пропуск, тест',
+  auction: 'таймер, приём, итог', goal: 'пауза, срок, добавить сумму', giveaway: 'приём, выбор, перевыбор',
+  wheel: 'кнопка «Крутить»', counters: 'плюс и минус'
+}
+const PRESET_NAMES: { id: keyof typeof DOCK_PRESETS; name: string }[] = [
+  { id: 'operator', name: 'Панель оператора' },
+  { id: 'buttons', name: 'Быстрые кнопки' },
+  { id: 'chat', name: 'Чат и алерты' }
+]
+
+/** Док для OBS: набор блоков (готовый или свой) и ссылка. */
+function DockCard({ snap, url }: { snap: HubSnapshot; url: string }) {
+  const [copied, setCopied] = useState<'main' | 'fixed' | null>(null)
+  const [confirm, setConfirm] = useState(false)
+  const blocks = snap.settings.dock.blocks
+  const setBlocks = (list: DockBlock[]): void => void window.hub.setSettings({ dock: { blocks: DOCK_BLOCKS.filter((b) => list.includes(b)) } })
+  const preset = PRESET_NAMES.find((p) => DOCK_PRESETS[p.id].join() === blocks.join())?.id
+  const copy = (which: 'main' | 'fixed', text: string): void => {
+    void window.hub.copy(text)
+    setCopied(which)
+    setTimeout(() => setCopied(null), 1500)
+  }
+  return (
+    <div className="card dock-card">
+      <h3>Док для OBS <Hint id="dock" /></h3>
+      <p className="small muted" style={{ marginTop: -6 }}>Панель прямо в окне OBS: нажимать кнопки во время эфира, не переключаясь в Crossember. Выберите готовый набор или отметьте блоки сами.</p>
+      <div className="seg" style={{ flexWrap: 'wrap' }}>
+        {PRESET_NAMES.map((p) => <button key={p.id} className={preset === p.id ? 'on' : ''} onClick={() => setBlocks(DOCK_PRESETS[p.id])}>{p.name}</button>)}
+        <button className={preset ? '' : 'on'} disabled style={{ cursor: 'default' }}>Свой набор</button>
+      </div>
+      <div className="profile-parts dock-blocks">
+        {DOCK_BLOCKS.map((b) => (
+          <label key={b} className="profile-part">
+            <input type="checkbox" checked={blocks.includes(b)} onChange={(e) => setBlocks(e.target.checked ? [...blocks, b] : blocks.filter((x) => x !== b))} />
+            <span><b>{BLOCK_NAMES[b]}</b><span className="small muted">{BLOCK_DESC[b]}</span></span>
+          </label>
+        ))}
+      </div>
+      <div className="url">
+        <code title="Ссылка содержит ключ доступа — не показывайте её в эфире">{url.replace(/k=.+$/, 'k=••••••')}</code>
+        <button className="btn sm" onClick={() => copy('main', url)}>{copied === 'main' ? 'Скопировано ✓' : 'Скопировать'}</button>
+      </div>
+      <p className="small muted">В OBS: <b>Док-панели → Пользовательские док-панели браузера</b> (Docks → Custom Browser Docks) → любое имя, например «Crossember» → вставьте ссылку → «Применить». Галочки здесь меняют док сразу, ссылку заново вставлять не нужно.</p>
+      <div className="btnrow" style={{ alignItems: 'center' }}>
+        <button className="btn sm" disabled={!blocks.length} onClick={() => copy('fixed', `${url}&b=${blocks.join(',')}`)}>{copied === 'fixed' ? 'Скопировано ✓' : 'Ссылка только с этими блоками'}</button>
+        <span className="small muted">— для второго дока с другим набором (например, чат отдельно, кнопки отдельно). Такая ссылка запоминает текущие галочки.</span>
+      </div>
+      <KeyRotate label="Перевыпустить ключ дока" confirm={confirm} onAsk={() => setConfirm(true)} onCancel={() => setConfirm(false)} onYes={() => { void window.hub.rotateKey('dock'); setConfirm(false) }} />
+    </div>
   )
 }
 

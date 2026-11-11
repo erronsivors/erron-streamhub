@@ -19,6 +19,7 @@ import type { Auction } from './auction'
 import type { Wheel } from './wheel'
 import type { Fundraiser } from './goal'
 import type { Giveaway } from './giveaway'
+import { dockView, parseAction, runAction, type DockActionTable } from './dock'
 
 /** Оверлеи для OBS. id = имя файла в resources/overlays, key = ключ настроек. */
 const OVERLAYS = [
@@ -46,7 +47,7 @@ const ASSETS: Record<string, string> = {
   'alertkit.css': 'text/css; charset=utf-8',
   'chat.js': 'text/javascript; charset=utf-8',
   'pinned.js': 'text/javascript; charset=utf-8',
-  'remote.js': 'text/javascript; charset=utf-8',
+  'dock.js': 'text/javascript; charset=utf-8',
   'top.js': 'text/javascript; charset=utf-8',
   'last.js': 'text/javascript; charset=utf-8',
   'counter.js': 'text/javascript; charset=utf-8',
@@ -116,14 +117,19 @@ export interface OverlayExtras {
 export interface RemoteActions {
   send: (text: string) => Promise<void>
   pin: (id: string | null) => void
+  /** Кнопки дока: имя → действие. Только этот список, аргументы проверяются ещё и в модулях. */
+  dock: DockActionTable
 }
 
-type Kind = 'local' | 'lan'
+/** local — оверлеи (только чтение), dock — док для OBS на этом ПК, lan — пульт второго устройства. */
+type Kind = 'local' | 'lan' | 'dock'
 
 /**
  * Сервер Crossember.
  * - local: оверлеи для OBS, слушает ТОЛЬКО 127.0.0.1, ключ оверлеев, только чтение.
- * - lan: страница чата для второго ПК, слушает выбранный адрес домашней сети, отдельный ключ пульта.
+ * - dock: док для OBS — тот же сервер 127.0.0.1, но свой ключ (ключ оверлеев кнопки не открывает).
+ * - lan: тот же док для второго ПК, слушает выбранный адрес домашней сети, отдельный ключ пульта;
+ *   кнопки там работают, только если включены в настройках, иначе — только чат.
  * Везде: ключ в каждом запросе (сравнение за постоянное время), проверка Host (DNS-rebinding) и Origin у WebSocket.
  */
 export class OverlayServer {
@@ -138,6 +144,8 @@ export class OverlayServer {
   onClients: () => void = () => undefined
   private overlayKey: string
   private remoteKey: string
+  private dockKey: string
+  private dockTimer: NodeJS.Timeout | null = null
   private lanError: string | null = null
   private lanUrl: string | null = null
   /** Отпечаток файлов оверлеев: изменился (новая версия Crossember) — открытые оверлеи перезагрузятся сами. */
@@ -157,6 +165,7 @@ export class OverlayServer {
     this.port = store.get('server.port', 47832)
     this.overlayKey = store.get('server.overlayKey', '') || this.rotate('overlay')
     this.remoteKey = store.get('server.remoteKey', '') || this.rotate('remote')
+    this.dockKey = store.get('server.dockKey', '') || this.rotate('dock')
     hub.on('event', (e: HubEvent) => this.broadcast({ kind: 'event', event: e }))
     hub.on('delete', (d: unknown) => this.broadcast({ kind: 'delete', ...(d as object) }))
     hub.on('pinned', (m: HubEvent | null) => this.broadcast({ kind: 'pinned', event: m }))
@@ -168,6 +177,8 @@ export class OverlayServer {
     extras.wheel.on('change', () => this.broadcast({ kind: 'wheel', wheel: extras.wheel.overlay() }, 'local'))
     extras.goal.on('change', () => this.broadcast({ kind: 'goal', goal: extras.goal.overlay() }, 'local'))
     extras.giveaway.on('change', () => this.broadcast({ kind: 'giveaway', giveaway: extras.giveaway.overlay() }, 'local'))
+    // Док: любое изменение — одно обновление состояния (не чаще раза в 100 мс).
+    for (const src of [extras.alerts, extras.auction, extras.goal, extras.giveaway, extras.wheel, extras.counters]) src.on('change', () => this.scheduleDock())
     hub.on('event', (e: HubEvent) => {
       if (e.type !== 'message' && e.type !== 'system' && !e.test) this.pushStats()
     })
@@ -183,12 +194,14 @@ export class OverlayServer {
     this.broadcast({ kind: 'stats', stats: this.statsData() }, 'local')
   }
 
-  rotate(which: 'overlay' | 'remote'): string {
+  rotate(which: 'overlay' | 'remote' | 'dock'): string {
     const k = newKey()
     if (which === 'overlay') this.overlayKey = k
+    else if (which === 'dock') this.dockKey = k
     else this.remoteKey = k
-    this.store.set(which === 'overlay' ? 'server.overlayKey' : 'server.remoteKey', k)
-    for (const [s, kind] of this.sockets) if ((kind === 'local') === (which === 'overlay')) s.close(4001, 'key rotated')
+    this.store.set(`server.${which}Key`, k)
+    const kindOf: Kind = which === 'overlay' ? 'local' : which === 'dock' ? 'dock' : 'lan'
+    for (const [s, kind] of this.sockets) if (kind === kindOf) s.close(4001, 'key rotated')
     if (which === 'remote' && this.lanUrl) this.lanUrl = this.lanUrl.replace(/k=.*$/, `k=${k}`)
     return k
   }
@@ -196,8 +209,28 @@ export class OverlayServer {
   /** Сообщить оверлеям о новых настройках (тема, размер шрифта…). */
   pushConfig(): void {
     const s = this.settings.get()
-    this.broadcast({ kind: 'config', overlays: { ...s.overlays, float: s.float } })
+    this.broadcast({ kind: 'config', overlays: { ...s.overlays, float: s.float }, dockBlocks: s.dock.blocks, lanControl: s.lan.control })
     this.pushStats()
+    this.pushDock()
+  }
+
+  private dockData(): unknown {
+    return dockView(this.extras)
+  }
+
+  private scheduleDock(): void {
+    if (!this.dockTimer) this.dockTimer = setTimeout(() => { this.dockTimer = null; this.pushDock() }, 100)
+  }
+
+  /** Состояние для дока: в док OBS всегда, на второе устройство — только если там разрешены кнопки. */
+  private pushDock(): void {
+    let data: string | null = null
+    const control = this.settings.get().lan.control
+    for (const [s, kind] of this.sockets) {
+      if (s.readyState !== s.OPEN || (kind !== 'dock' && !(kind === 'lan' && control))) continue
+      data ??= JSON.stringify({ kind: 'dock', dock: this.dockData() })
+      s.send(data)
+    }
   }
 
   info(): ServerInfo {
@@ -207,6 +240,7 @@ export class OverlayServer {
       baseUrl,
       overlayKey: this.overlayKey,
       overlays: OVERLAYS.filter((o) => !o.hidden).map((o) => ({ id: o.id, name: o.name, size: o.size, url: `${baseUrl}/o/${o.id}?k=${this.overlayKey}` })),
+      dockUrl: `${baseUrl}/dock?k=${this.dockKey}`,
       lan: { running: !!this.lan, url: this.lanUrl, error: this.lanError, addresses: lanAddresses() }
     }
   }
@@ -239,14 +273,17 @@ export class OverlayServer {
 
   private hello(kind: Kind, ov = ''): string {
     const s = this.settings.get()
+    const isDock = kind !== 'local'
     return JSON.stringify({
       kind: 'hello',
       build: this.overlayBuild,
-      role: kind === 'lan' ? 'remote' : 'overlay',
+      role: kind === 'lan' ? 'remote' : kind === 'dock' ? 'dock' : 'overlay',
       overlays: { ...s.overlays, float: s.float },
       chat: this.hub.recentChat().slice(0, 50),
-      events: kind === 'lan' ? this.hub.recent().slice(0, 30) : [],
+      events: isDock ? this.hub.recent().slice(0, 30) : [],
       pinned: this.hub.pinned,
+      ...(isDock ? { dockBlocks: s.dock.blocks, lanControl: s.lan.control } : {}),
+      ...(kind === 'dock' || (kind === 'lan' && s.lan.control) ? { dock: this.dockData() } : {}),
       ...(kind === 'local' ? { stats: this.statsData(), counters: this.extras.counters.list(), auction: this.extras.auction.overlay(), wheel: this.extras.wheel.overlay(), goal: this.extras.goal.overlay(), giveaway: this.extras.giveaway.overlay() } : {}),
       // Снимок для оверлея алертов после (пере)подключения: что идёт сейчас и с какого момента.
       ...(ov === 'alert' ? { alert: this.extras.alerts.nowPlaying() } : {})
@@ -269,6 +306,10 @@ export class OverlayServer {
     app.get('/health', async () => ({ ok: true }))
 
     if (kind === 'local') {
+      app.get<{ Querystring: { k?: string } }>('/dock', async (req, reply) => {
+        if (!sameKey(req.query.k, this.dockKey)) return reply.code(403).type('text/plain; charset=utf-8').send('Нет доступа: неверный ключ дока. Скопируйте ссылку заново в Crossember → Оверлеи → Док для OBS.')
+        return reply.header('Content-Security-Policy', PAGE_CSP).type('text/html; charset=utf-8').send(await asset('dock.html'))
+      })
       app.get<{ Params: { id: string }; Querystring: { k?: string } }>('/o/:id', async (req, reply) => {
         if (!sameKey(req.query.k, key())) return reply.code(403).type('text/plain; charset=utf-8').send('Нет доступа: неверный ключ оверлея')
         const o = OVERLAYS.find((x) => x.id === req.params.id)
@@ -278,7 +319,7 @@ export class OverlayServer {
     } else {
       app.get<{ Querystring: { k?: string } }>('/remote', async (req, reply) => {
         if (!sameKey(req.query.k, key())) return reply.code(403).type('text/plain; charset=utf-8').send('Нет доступа: неверный ключ. Скопируйте ссылку заново в Crossember → Настройки → Второй ПК.')
-        return reply.header('Content-Security-Policy', PAGE_CSP).type('text/html; charset=utf-8').send(await asset('remote.html'))
+        return reply.header('Content-Security-Policy', PAGE_CSP).type('text/html; charset=utf-8').send(await asset('dock.html'))
       })
     }
 
@@ -330,8 +371,17 @@ export class OverlayServer {
 
     app.get<{ Querystring: { k?: string } }>('/ws', { websocket: true }, (socket, req) => {
       const origin = req.headers.origin
-      if ((origin && !origins.includes(origin)) || !sameKey(req.query.k, key())) {
+      // На локальном сервере ключ дока превращает подключение в док (с кнопками), ключ оверлеев — в оверлей.
+      const asDock = kind === 'local' && sameKey(req.query.k, this.dockKey)
+      if ((origin && !origins.includes(origin)) || (!asDock && !sameKey(req.query.k, key()))) {
         socket.close(4003, 'forbidden')
+        return
+      }
+      if (asDock) {
+        this.sockets.set(socket, 'dock')
+        socket.on('close', () => this.sockets.delete(socket))
+        socket.send(this.hello('dock'))
+        this.controlSocket(socket, 'dock')
         return
       }
       this.sockets.set(socket, kind)
@@ -373,28 +423,46 @@ export class OverlayServer {
         })
         return
       }
-      // Пульт второго ПК: только два действия, с ограничением частоты.
-      let last = 0
-      socket.on('message', (raw: Buffer) => {
-        const now = Date.now()
-        if (now - last < 500) return
-        last = now
-        let m: { kind?: unknown; text?: unknown; id?: unknown }
-        try {
-          m = JSON.parse(raw.toString('utf8'))
-        } catch {
-          return
-        }
-        if (m.kind === 'send' && typeof m.text === 'string') {
-          this.actions.send(m.text.slice(0, 500)).catch((e) => socket.send(JSON.stringify({ kind: 'error', text: (e as Error).message })))
-        } else if (m.kind === 'pin' && (m.id === null || (typeof m.id === 'string' && m.id.length <= 100))) {
-          this.actions.pin(m.id as string | null)
-        }
-      })
+      this.controlSocket(socket, 'lan')
     })
 
     await app.listen({ host, port })
     return app
+  }
+
+  /**
+   * Команды от дока и пульта: написать в чат, закрепить, кнопки дока (act).
+   * Ограничение частоты: сообщение в чат — не чаще раза в 0,5 с, кнопки — не больше 12 за 3 с.
+   * Со второго устройства кнопки работают, только если это включено в настройках (проверяется на каждую команду).
+   */
+  private controlSocket(socket: WebSocket, kind: 'dock' | 'lan'): void {
+    let lastSend = 0
+    let acts = 0
+    const reset = setInterval(() => { acts = 0 }, 3000)
+    socket.on('close', () => clearInterval(reset))
+    const fail = (text: string): void => { if (socket.readyState === socket.OPEN) socket.send(JSON.stringify({ kind: 'error', text })) }
+    socket.on('message', (raw: Buffer) => {
+      let m: { kind?: unknown; text?: unknown; id?: unknown }
+      try {
+        m = JSON.parse(raw.toString('utf8'))
+      } catch {
+        return
+      }
+      if (m.kind === 'send' && typeof m.text === 'string') {
+        const now = Date.now()
+        if (now - lastSend < 500) return
+        lastSend = now
+        this.actions.send(m.text.slice(0, 500)).catch((e) => fail((e as Error).message))
+      } else if (m.kind === 'pin' && (m.id === null || (typeof m.id === 'string' && m.id.length <= 100))) {
+        this.actions.pin(m.id as string | null)
+      } else if (m.kind === 'act') {
+        if (kind === 'lan' && !this.settings.get().lan.control) return fail('Кнопки на этом устройстве выключены: Crossember → Настройки → Чат на другом устройстве')
+        if (++acts > 12) return fail('Слишком часто — подождите пару секунд')
+        const a = parseAction(m, this.actions.dock)
+        if (!a) return
+        void runAction(this.actions.dock, a.name, a.args).then((err) => { if (err) fail(err) })
+      }
+    })
   }
 
   async start(): Promise<void> {
@@ -451,6 +519,7 @@ export class OverlayServer {
   }
 
   async stop(): Promise<void> {
+    if (this.dockTimer) clearTimeout(this.dockTimer)
     for (const s of this.sockets.keys()) s.close()
     await this.lan?.close()
     await this.local?.close()

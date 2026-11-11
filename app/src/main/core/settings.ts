@@ -1,4 +1,5 @@
 import type { Store } from './db'
+import { DOCK_PRESETS, sanitizeBlocks, type DockBlock } from './dock'
 
 /**
  * Все пользовательские настройки Crossember. Ничего не зашито под конкретного стримера:
@@ -115,7 +116,11 @@ export interface AppSettings {
     enabled: boolean
     host: string
     port: number
+    /** На втором устройстве можно не только читать чат, но и нажимать кнопки дока. */
+    control: boolean
   }
+  /** Док для OBS: какие блоки показывать (ссылка без своего набора берёт этот). */
+  dock: { blocks: DockBlock[] }
   overlays: {
     alert: { theme: Theme }
     chat: ChatOverlaySettings
@@ -237,7 +242,8 @@ export const DEFAULTS: AppSettings = {
   boosty: { poll: false },
   alerts: ALERT_DEFAULTS,
   tts: { engine: 'windows', voice: '', rate: 0, volume: 100, maxChars: 200, stripLinks: true, badWords: '' },
-  lan: { enabled: false, host: '', port: 47833 },
+  lan: { enabled: false, host: '', port: 47833, control: false },
+  dock: { blocks: DOCK_PRESETS.operator.slice() },
   overlays: {
     alert: { theme: 'general' },
     chat: chatDefaults(false),
@@ -388,8 +394,10 @@ export function sanitize(input: unknown, base: AppSettings = DEFAULTS): AppSetti
     lan: {
       enabled: bool(lan.enabled, base.lan.enabled),
       host: host === '' || /^(\d{1,3}\.){3}\d{1,3}$/.test(host) ? host : base.lan.host,
-      port: int(lan.port, base.lan.port, 1024, 65535)
+      port: int(lan.port, base.lan.port, 1024, 65535),
+      control: bool(lan.control, base.lan.control ?? false)
     },
+    dock: { blocks: sanitizeBlocks(obj(i.dock).blocks, base.dock?.blocks ?? DOCK_PRESETS.operator) },
     overlays: {
       alert: { theme: theme(obj(ov.alert).theme, base.overlays.alert.theme) },
       chat: chat(ov.chat, base.overlays.chat),

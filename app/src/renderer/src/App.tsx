@@ -34,7 +34,7 @@ const NAV: { id: Page; label: string; ico: string; soon?: boolean }[] = [
   { id: 'settings', label: 'Настройки', ico: '⚙' }
 ]
 
-const LATER = ['Пульт со второго ПК']
+const LATER = ['Локальная аналитика']
 
 export function App() {
   const [snap, setSnap] = useState<HubSnapshot | null>(null)
