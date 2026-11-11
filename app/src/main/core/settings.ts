@@ -125,8 +125,29 @@ export interface AppSettings {
     last: { theme: Theme; fontSize: number; showSub: boolean }
     /** Счётчики: какие показывать (пусто — все), в столбик или в строку. */
     counter: { theme: Theme; fontSize: number; ids: string[]; layout: 'column' | 'row' }
+    /** Аукцион: сколько лотов, что показывать (сумму, долю или обе), таймер. */
+    auction: { theme: Theme; fontSize: number; count: number; show: 'sum' | 'pct' | 'both'; showTimer: boolean }
   }
   float: FloatChatSettings
+  auction: AuctionSettings
+}
+
+/** Правила аукциона (лоты и ставки хранятся отдельно, в auction.v1). */
+export interface AuctionSettings {
+  /** Награда Twitch за баллы, которая считается ставкой (название). Пусто — баллы не принимаются. */
+  pointsReward: string
+  /** Сколько баллов = 1 ₽. */
+  pointsPerRub: number
+  /** От этой суммы (₽) лот из сообщения создаётся сам; 0 — всегда в очередь. */
+  autoLotMin: number
+  /** Продлевать таймер при ставке под конец. */
+  extend: boolean
+  /** Если осталось меньше стольких секунд… */
+  extendBelowSec: number
+  /** …добавить столько секунд. */
+  extendAddSec: number
+  /** Таймер по умолчанию, минут. */
+  defaultMin: number
 }
 
 const chatDefaults = (horizontal: boolean): ChatOverlaySettings => ({
@@ -182,9 +203,11 @@ export const DEFAULTS: AppSettings = {
     pinned: { theme: 'general', fontSize: 34 },
     top: { theme: 'general', period: 'stream', count: 5, fontSize: 24 },
     last: { theme: 'general', fontSize: 26, showSub: true },
-    counter: { theme: 'general', fontSize: 30, ids: [], layout: 'column' }
+    counter: { theme: 'general', fontSize: 30, ids: [], layout: 'column' },
+    auction: { theme: 'general', fontSize: 24, count: 5, show: 'both', showTimer: true }
   },
-  float: { ...chatDefaults(false), fontSize: 18, maxMessages: 12, hideAfterSec: 45, showStatus: true, enabled: false, bgOpacity: 55, bounds: null }
+  float: { ...chatDefaults(false), fontSize: 18, maxMessages: 12, hideAfterSec: 45, showStatus: true, enabled: false, bgOpacity: 55, bounds: null },
+  auction: { pointsReward: '', pointsPerRub: 100, autoLotMin: 300, extend: true, extendBelowSec: 60, extendAddSec: 30, defaultMin: 10 }
 }
 
 const theme = (v: unknown, d: Theme): Theme => (v === 'general' || v === 'campfire' ? v : d)
@@ -340,9 +363,30 @@ export function sanitize(input: unknown, base: AppSettings = DEFAULTS): AppSetti
         const b = base.overlays.counter ?? DEFAULTS.overlays.counter
         const ids = Array.isArray(o.ids) ? o.ids.filter((x): x is string => typeof x === 'string' && /^[\w-]{1,40}$/.test(x)).slice(0, 50) : b.ids
         return { theme: theme(o.theme, b.theme), fontSize: int(o.fontSize, b.fontSize, 12, 96), ids, layout: o.layout === 'row' || o.layout === 'column' ? o.layout : b.layout }
+      })(),
+      auction: (() => {
+        const o = obj(ov.auction)
+        const b = base.overlays.auction ?? DEFAULTS.overlays.auction
+        return {
+          theme: theme(o.theme, b.theme), fontSize: int(o.fontSize, b.fontSize, 12, 72), count: int(o.count, b.count, 1, 20),
+          show: o.show === 'sum' || o.show === 'pct' || o.show === 'both' ? o.show : b.show, showTimer: bool(o.showTimer, b.showTimer)
+        }
       })()
     },
-    float: float(i.float, base.float ?? DEFAULTS.float)
+    float: float(i.float, base.float ?? DEFAULTS.float),
+    auction: (() => {
+      const o = obj(i.auction)
+      const b = base.auction ?? DEFAULTS.auction
+      return {
+        pointsReward: text(o.pointsReward, b.pointsReward, 45).trim(),
+        pointsPerRub: int(o.pointsPerRub, b.pointsPerRub, 1, 1_000_000),
+        autoLotMin: int(o.autoLotMin, b.autoLotMin, 0, 10_000_000),
+        extend: bool(o.extend, b.extend),
+        extendBelowSec: int(o.extendBelowSec, b.extendBelowSec, 5, 600),
+        extendAddSec: int(o.extendAddSec, b.extendAddSec, 5, 600),
+        defaultMin: int(o.defaultMin, b.defaultMin, 1, 600)
+      }
+    })()
   }
 }
 

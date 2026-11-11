@@ -378,7 +378,7 @@ export class TwitchConnector implements ChatConnector {
       case 'channel.channel_points_custom_reward_redemption.add':
         this.hub.push({
           ...base, type: 'reward', user: s(e.user_name), userId: s(e.user_id),
-          amount: Number((e.reward as Json)?.cost) || 0, currency: 'points',
+          amount: Number((e.reward as Json)?.cost) || 0, currency: 'points', reward: s((e.reward as Json)?.title),
           text: [s((e.reward as Json)?.title), s(e.user_input)].filter(Boolean).join(' — ')
         })
         break

@@ -16,6 +16,7 @@ import { VkConnector } from './core/vk'
 import { YoutubeConnector } from './core/youtube'
 import { AlertEngine, fill, setVarsSource } from './core/alerts'
 import { Counters } from './core/counters'
+import { Auction } from './core/auction'
 import { Profiles, type ProfilePart } from './core/profile'
 import { KickAuth } from './core/kickauth'
 import { StreamInfo, INFO_PLATFORMS, type InfoPlatform } from './core/streaminfo'
@@ -58,6 +59,7 @@ let tts: WindowsTts
 let templates: TemplateStore
 let rules: RuleEngine
 let counters: Counters
+let auction: Auction
 let profiles: Profiles
 let kickAuth: KickAuth
 let streamInfo: StreamInfo
@@ -90,6 +92,7 @@ function snapshot(): HubSnapshot {
     profile: profiles.state(),
     streamInfo: streamInfo.state(),
     kickAuth: kickAuth.state(),
+    auction: auction.state(),
     alertOverlays: server ? server.openCount('alert') : 0,
     float: { open: floatChat?.isOpen ?? false, editing: floatChat?.isEditing ?? false, hotkey: FLOAT_HOTKEY.replace('CommandOrControl', 'Ctrl') }
   }
@@ -227,6 +230,8 @@ app.whenReady().then(async () => {
   counters = new Counters(store)
   counters.on('change', pushUpdate)
   setVarsSource(() => counters.vars())
+  auction = new Auction(store, settings, hub)
+  auction.on('change', pushUpdate)
   rules = new RuleEngine(hub, store, settings, templates, {
     play: (plan, e, force) => alerts.play(plan, e, force),
     obs: runObs,
@@ -251,7 +256,7 @@ app.whenReady().then(async () => {
   server = new OverlayServer(hub, store, settings, images, resourcesDir, app.getAppPath(), {
     send: (text) => chats.send(text, chats.states().filter((p) => p.canSend).map((p) => p.id), 'broadcaster'),
     pin: (id) => hub.togglePin(id)
-  }, { alerts, stats, sounds, media, tts, counters })
+  }, { alerts, stats, sounds, media, tts, counters, auction })
   obs.onChange = pushUpdate
   server.onClients = pushUpdate
   floatChat = new FloatChat(settings, hub, () => server.overlayUrl('float'))
@@ -371,6 +376,23 @@ app.whenReady().then(async () => {
     const v = typeof n === 'number' && Number.isFinite(n) ? Math.abs(Math.round(n)) : 1
     return counters.apply(str(id, 100), op === 'sub' ? 'sub' : op === 'set' ? 'set' : 'add', v)
   })
+  // ---------- Аукцион ----------
+  handle('hub:aucLotAdd', (name) => auction.addLot(str(name, 200)))
+  handle('hub:aucLotRename', (id, name) => auction.renameLot(str(id, 100), str(name, 200)))
+  handle('hub:aucLotApprove', (id) => auction.approveLot(str(id, 100)))
+  handle('hub:aucLotRemove', (id) => auction.removeLot(str(id, 100)))
+  handle('hub:aucLotMerge', (from, into) => auction.mergeLots(str(from, 100), str(into, 100)))
+  handle('hub:aucLotAddSum', (id, n) => auction.addToLot(str(id, 100), n))
+  handle('hub:aucBetAssign', (bet, lot) => auction.assignBet(str(bet, 100), str(lot, 100)))
+  handle('hub:aucBetNewLot', (bet, name) => auction.betToNewLot(str(bet, 100), typeof name === 'string' ? str(name, 200) : undefined))
+  handle('hub:aucBetReject', (bet) => auction.rejectBet(str(bet, 100)))
+  handle('hub:aucBetReopen', (bet) => auction.reopenBet(str(bet, 100)))
+  handle('hub:aucManualBet', (v) => auction.manualBet(v))
+  handle('hub:aucTimer', (op, sec) => auction.timer(str(op, 10), sec))
+  handle('hub:aucAccepting', (v) => auction.setAccepting(v === true))
+  handle('hub:aucFinish', () => auction.finish())
+  handle('hub:aucReset', (keepLots) => auction.reset(keepLots === true))
+  handle('hub:aucClearArchive', () => auction.clearArchive())
   // ---------- Шаблоны алертов (конструктор) ----------
   handle('hub:templatePut', (t) => templates.put(t))
   handle('hub:templateRemove', (id) => {
@@ -506,6 +528,7 @@ function syncHotkeys(): void {
 app.on('before-quit', () => {
   for (const accel of ruleKeys.keys()) globalShortcut.unregister(accel)
   rules?.dispose()
+  auction?.stop()
   kickAuth?.cancelLogin()
   floatChat?.close()
   chats.stopAll()

@@ -94,6 +94,7 @@ export class Hub extends EventEmitter {
       color: cleanColor(e.color),
       badges: e.badges?.slice(0, 8).map((b) => ({ title: clean(b.title, 64), url: b.url })),
       currency: e.currency === undefined ? undefined : clean(e.currency, 8).toUpperCase(),
+      reward: e.reward === undefined ? undefined : clean(e.reward, 100),
       amount: num(e.amount),
       amountRub: num(e.amountRub) ?? (e.currency?.toUpperCase() === 'RUB' && e.type === 'donation' ? num(e.amount) : undefined)
     }

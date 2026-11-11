@@ -4,7 +4,7 @@ import type { AppSettings, ChatOverlaySettings, StatsPeriod, Theme } from '../..
 import { Hint, NumberField, ThemePicker, Toggle } from '../components'
 
 type Key = keyof AppSettings['overlays']
-const KEY: Record<string, Key> = { alert: 'alert', chat: 'chat', 'chat-h': 'chatH', pinned: 'pinned', top: 'top', last: 'last', counter: 'counter' }
+const KEY: Record<string, Key> = { alert: 'alert', chat: 'chat', 'chat-h': 'chatH', pinned: 'pinned', top: 'top', last: 'last', counter: 'counter', auction: 'auction' }
 const DESC: Record<string, string> = {
   alert: 'Донаты, подписки, рейды, фолловы — по очереди, по центру экрана.',
   chat: 'Колонка чата: новые сообщения снизу.',
@@ -12,7 +12,8 @@ const DESC: Record<string, string> = {
   pinned: 'Сообщение, которое вы закрепили в Мультичате (📌).',
   top: 'Самые щедрые зрители за эфир, день, неделю, месяц или всё время. Тестовые донаты не считаются.',
   last: 'Последний донат (и последняя подписка) — строкой поверх сцены.',
-  counter: 'Смерти, победы и другие счётчики из раздела «Правила». Число коротко подпрыгивает, когда меняется.'
+  counter: 'Смерти, победы и другие счётчики из раздела «Правила». Число коротко подпрыгивает, когда меняется.',
+  auction: 'Таймер и топ лотов с полосками доли, в конце — победитель. Ники и сообщения зрителей не показываются.'
 }
 
 export function Overlays({ snap }: { snap: HubSnapshot }) {
@@ -67,6 +68,7 @@ function OverlayCard({ o, snap }: { o: OverlayInfo; snap: HubSnapshot }) {
         </>
       )}
       {key === 'counter' && <CounterSettings c={cfg as AppSettings['overlays']['counter']} snap={snap} set={set} />}
+      {key === 'auction' && <AuctionOverlaySettings c={cfg as AppSettings['overlays']['auction']} set={set} />}
       {key === 'pinned' && (
         <NumberField label="Размер шрифта" value={(cfg as { fontSize: number }).fontSize} min={12} max={96} suffix="px" onChange={(v) => set({ fontSize: v })} />
       )}
@@ -118,6 +120,26 @@ function CounterSettings({ c, snap, set }: { c: AppSettings['overlays']['counter
         </div>
         <NumberField label="Размер шрифта" value={c.fontSize} min={12} max={96} suffix="px" onChange={(v) => set({ fontSize: v })} />
       </div>
+    </>
+  )
+}
+
+function AuctionOverlaySettings({ c, set }: { c: AppSettings['overlays']['auction']; set: (p: Record<string, unknown>) => void }) {
+  return (
+    <>
+      <div className="field">
+        <label>Что показывать у лота</label>
+        <div className="seg">
+          <button className={c.show === 'sum' ? 'on' : ''} onClick={() => set({ show: 'sum' })}>Сумму</button>
+          <button className={c.show === 'pct' ? 'on' : ''} onClick={() => set({ show: 'pct' })}>Долю, %</button>
+          <button className={c.show === 'both' ? 'on' : ''} onClick={() => set({ show: 'both' })}>Обе</button>
+        </div>
+      </div>
+      <div className="grid g2" style={{ gap: 10 }}>
+        <NumberField label="Сколько лотов" value={c.count} min={1} max={20} onChange={(v) => set({ count: v })} />
+        <NumberField label="Размер шрифта" value={c.fontSize} min={12} max={72} suffix="px" onChange={(v) => set({ fontSize: v })} />
+      </div>
+      <Toggle on={c.showTimer} onChange={(v) => set({ showTimer: v })} label="Показывать таймер" />
     </>
   )
 }

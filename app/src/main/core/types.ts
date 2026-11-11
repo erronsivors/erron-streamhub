@@ -11,6 +11,7 @@ import type { Counter } from './counters'
 import type { ProfileState } from './profile'
 import type { StreamInfoState } from './streaminfo'
 import type { KickAuthState } from './kickauth'
+import type { AuctionState } from './auction'
 
 export type Platform = 'twitch' | 'youtube' | 'vk' | 'kick' | 'goodgame' | 'donationalerts' | 'donatepay' | 'donatex' | 'boosty' | 'obs' | 'hub'
 
@@ -44,6 +45,8 @@ export interface HubEvent {
   test?: boolean
   /** Донат, добавленный вручную (наличные, перевод). В базе такие события — с площадкой hub. */
   manual?: boolean
+  /** Награда за баллы канала: её название (текст события — «название — ввод зрителя»). */
+  reward?: string
   /** Значения счётчиков на момент срабатывания правила (для подстановки {ключ}); в базу не пишется. */
   vars?: Record<string, string>
 }
@@ -140,6 +143,7 @@ export interface HubSnapshot {
   profile: ProfileState
   streamInfo: StreamInfoState
   kickAuth: KickAuthState
+  auction: AuctionState
   /** Сколько копий оверлея «Алерты» сейчас открыто (0 — алерты и озвучку некому показать). */
   alertOverlays: number
   float: { open: boolean; editing: boolean; hotkey: string }

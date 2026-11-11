@@ -9,11 +9,12 @@ import { Overlays } from './pages/Overlays'
 import { Settings } from './pages/Settings'
 import { Alerts } from './pages/Alerts'
 import { Rules } from './pages/Rules'
+import { Auction } from './pages/Auction'
 import { Wizard } from './pages/Wizard'
 import { ModeContext } from './components'
 import { useNow, fmtDuration } from './ui'
 
-export type Page = 'home' | 'chat' | 'events' | 'alerts' | 'rules' | 'overlays' | 'connections' | 'settings'
+export type Page = 'home' | 'chat' | 'events' | 'alerts' | 'rules' | 'auction' | 'overlays' | 'connections' | 'settings'
 
 const NAV: { id: Page; label: string; ico: string; soon?: boolean }[] = [
   { id: 'home', label: 'Главная', ico: '⌂' },
@@ -21,12 +22,13 @@ const NAV: { id: Page; label: string; ico: string; soon?: boolean }[] = [
   { id: 'events', label: 'События', ico: '⚡' },
   { id: 'alerts', label: 'Алерты', ico: '✦' },
   { id: 'rules', label: 'Правила', ico: '⇄' },
+  { id: 'auction', label: 'Аукцион', ico: '◈' },
   { id: 'overlays', label: 'Оверлеи', ico: '▣' },
   { id: 'connections', label: 'Подключения', ico: '⏚' },
   { id: 'settings', label: 'Настройки', ico: '⚙' }
 ]
 
-const LATER = ['Аукцион и колесо', 'Таймер и сбор средств', 'Пульт со второго ПК']
+const LATER = ['Колесо', 'Таймер и сбор средств', 'Пульт со второго ПК']
 
 export function App() {
   const [snap, setSnap] = useState<HubSnapshot | null>(null)
@@ -49,6 +51,7 @@ export function App() {
   const live = obs.streaming || snap.platforms.some((p) => p.live)
   const counted = snap.platforms.filter((p) => p.viewers !== null)
   const totalViewers = counted.length ? counted.reduce((a, p) => a + (p.viewers ?? 0), 0) : null
+  const pendingBets = snap.auction.bets.filter((b) => b.status === 'pending').length
 
   return (
     <ModeContext.Provider value={snap.settings.setupMode}>
@@ -66,6 +69,7 @@ export function App() {
               <span className="ico">{n.ico}</span>
               {n.label}
               {n.soon && <span className="soon">скоро</span>}
+              {n.id === 'auction' && pendingBets > 0 && <span className="nav-cnt" title="Ставки ждут решения">{pendingBets}</span>}
             </button>
           ))}
           <div className="side-sep">Дальше по плану</div>
@@ -104,6 +108,7 @@ export function App() {
           {page === 'settings' && <Settings snap={snap} />}
           {page === 'alerts' && <Alerts snap={snap} />}
           {page === 'rules' && <Rules snap={snap} />}
+          {page === 'auction' && <Auction snap={snap} />}
         </main>
       </div>
       {snap.settings.setupMode === null && <Wizard />}

@@ -7,6 +7,7 @@ import type { MediaInfo } from '../main/core/media'
 import type { AlertTemplate, ObsAction } from '../main/core/templates'
 import type { Rule } from '../main/core/rules'
 import type { Counter } from '../main/core/counters'
+import type { AuctionBet, AuctionLot, AuctionState } from '../main/core/auction'
 import type { ProfilePart, ProfileSummary } from '../main/core/profile'
 import type { ObsCatalog } from '../main/core/obs'
 import type { TtsVoice } from '../main/core/tts'
@@ -56,6 +57,22 @@ const api = {
   counterPut: (c: Partial<Counter> & { name: string }) => call<Counter>('hub:counterPut', c),
   counterRemove: (id: string) => call('hub:counterRemove', id),
   counterApply: (id: string, op: 'add' | 'sub' | 'set', n: number) => call<Counter | null>('hub:counterApply', id, op, n),
+  aucLotAdd: (name: string) => call<AuctionLot>('hub:aucLotAdd', name),
+  aucLotRename: (id: string, name: string) => call('hub:aucLotRename', id, name),
+  aucLotApprove: (id: string) => call('hub:aucLotApprove', id),
+  aucLotRemove: (id: string) => call('hub:aucLotRemove', id),
+  aucLotMerge: (from: string, into: string) => call('hub:aucLotMerge', from, into),
+  aucLotAddSum: (id: string, rub: number) => call('hub:aucLotAddSum', id, rub),
+  aucBetAssign: (bet: string, lot: string) => call('hub:aucBetAssign', bet, lot),
+  aucBetNewLot: (bet: string, name?: string) => call<AuctionLot>('hub:aucBetNewLot', bet, name),
+  aucBetReject: (bet: string) => call('hub:aucBetReject', bet),
+  aucBetReopen: (bet: string) => call('hub:aucBetReopen', bet),
+  aucManualBet: (b: { user: string; rub: number; text: string }) => call<AuctionBet>('hub:aucManualBet', b),
+  aucTimer: (op: 'start' | 'pause' | 'add' | 'sub' | 'set' | 'clear', sec?: number) => call('hub:aucTimer', op, sec),
+  aucAccepting: (v: boolean) => call('hub:aucAccepting', v),
+  aucFinish: () => call<AuctionState['winner']>('hub:aucFinish'),
+  aucReset: (keepLots: boolean) => call('hub:aucReset', keepLots),
+  aucClearArchive: () => call('hub:aucClearArchive'),
   templatePut: (t: AlertTemplate) => call<AlertTemplate>('hub:templatePut', t),
   templateRemove: (id: string) => call('hub:templateRemove', id),
   templateDuplicate: (id: string) => call<AlertTemplate | null>('hub:templateDuplicate', id),
