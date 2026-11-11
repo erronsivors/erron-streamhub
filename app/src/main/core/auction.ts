@@ -40,6 +40,8 @@ export interface AuctionBet {
   text: string
   lotId: string | null
   status: BetStatus
+  /** id события хаба: тот же донат, пришедший повторно (переподключение сервиса), второй раз не засчитывается. */
+  eventId?: string
 }
 
 export interface AuctionTimer {
@@ -145,7 +147,8 @@ function load(v: unknown): Saved {
     return {
       id, ts: Number(b.ts) || Date.now(), user: s(b.user, 64), platform: (PLATFORMS.has(b.platform as string) ? b.platform : 'hub') as Platform,
       source: b.source === 'points' ? 'points' : b.source === 'manual' ? 'manual' : 'donation',
-      rub: rub(Number(b.rub) || 0), raw: s(b.raw, 40), text: s(b.text, 300), lotId: status === 'lot' ? lotId : null, status
+      rub: rub(Number(b.rub) || 0), raw: s(b.raw, 40), text: s(b.text, 300), lotId: status === 'lot' ? lotId : null, status,
+      ...(s(b.eventId, 100) ? { eventId: s(b.eventId, 100) } : {})
     }
   }).filter((b): b is AuctionBet => !!b)
   const t = obj(o.timer)
@@ -245,11 +248,12 @@ export class Auction extends EventEmitter {
 
   private onEvent(e: HubEvent): void {
     if (e.test || !this.d.accepting) return
+    if (this.d.bets.some((b) => b.eventId === e.id)) return
     const cfg = this.settings.get().auction
     if (e.type === 'donation' && (e.amountRub ?? 0) > 0) {
       const amount = e.amountRub ?? 0
       const raw = e.currency && e.currency !== 'RUB' && e.amount ? `${fmt(e.amount)} ${e.currency}` : `${fmt(amount)} ₽`
-      this.addBet({ user: e.user, platform: e.platform, source: e.manual ? 'manual' : 'donation', rub: amount, raw, text: e.text ?? '' })
+      this.addBet({ user: e.user, platform: e.platform, source: e.manual ? 'manual' : 'donation', rub: amount, raw, text: e.text ?? '', eventId: e.id })
     } else if (e.type === 'reward' && e.platform === 'twitch' && cfg.pointsReward.trim() && cfg.pointsPerRub > 0) {
       const title = e.reward ?? ''
       if (norm(title) !== norm(cfg.pointsReward)) return
@@ -257,7 +261,7 @@ export class Auction extends EventEmitter {
       if (points <= 0) return
       // Текст награды приходит как «Название — ввод зрителя»: лот берём из ввода.
       const text = e.text && title && e.text.startsWith(title) ? e.text.slice(title.length).replace(/^\s*—\s*/, '') : (e.text ?? '')
-      this.addBet({ user: e.user, platform: e.platform, source: 'points', rub: points / cfg.pointsPerRub, raw: `${fmt(points)} баллов`, text })
+      this.addBet({ user: e.user, platform: e.platform, source: 'points', rub: points / cfg.pointsPerRub, raw: `${fmt(points)} баллов`, text, eventId: e.id })
     }
   }
 
@@ -294,11 +298,11 @@ export class Auction extends EventEmitter {
     return hits.length === 1 ? hits[0] : null
   }
 
-  private addBet(b: { user: string; platform: Platform; source: BetSource; rub: number; raw: string; text: string }): AuctionBet {
+  private addBet(b: { user: string; platform: Platform; source: BetSource; rub: number; raw: string; text: string; eventId?: string }): AuctionBet {
     const cfg = this.settings.get().auction
     const amount = rub(b.rub)
     const text = s(b.text, 300)
-    const bet: AuctionBet = { id: randomUUID(), ts: Date.now(), user: s(b.user, 64) || 'Зритель', platform: b.platform, source: b.source, rub: amount, raw: s(b.raw, 40), text, lotId: null, status: 'pending' }
+    const bet: AuctionBet = { id: randomUUID(), ts: Date.now(), user: s(b.user, 64) || 'Зритель', platform: b.platform, source: b.source, rub: amount, raw: s(b.raw, 40), text, lotId: null, status: 'pending', ...(b.eventId ? { eventId: b.eventId } : {}) }
     const lot = this.findLot(text)
     if (lot) {
       bet.lotId = lot.id
@@ -539,6 +543,18 @@ export class Auction extends EventEmitter {
     this.syncTick()
     this.changed()
     return this.d.winner
+  }
+
+  /** Победитель выбран колесом: этот лот. Приём ставок и таймер останавливаются. */
+  setWinner(lotId: string): void {
+    const l = this.lotViews().find((x) => x.id === lotId)
+    if (!l) return
+    this.d.timer.endsAt = null
+    this.d.timer.pausedLeft = null
+    this.d.accepting = false
+    this.d.winner = { lotId: l.id, name: l.name, rub: l.rub, ts: Date.now() }
+    this.syncTick()
+    this.changed()
   }
 
   /** Новый аукцион: итог текущего — в архив (если были ставки), всё остальное очищается. */

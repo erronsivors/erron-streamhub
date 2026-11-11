@@ -18,7 +18,7 @@ const SRC: Record<AuctionBet['source'], string> = { donation: 'донат', poin
 
 type Wrap = (p: Promise<unknown>, after?: () => void) => void
 
-export function Auction({ snap }: { snap: HubSnapshot }) {
+export function Auction({ snap, go }: { snap: HubSnapshot; go: (p: 'wheel') => void }) {
   const a = snap.auction
   const [err, setErr] = useState<string | null>(null)
   const wrap: Wrap = (p, after) => { setErr(null); p.then(() => after?.()).catch((e) => setErr(errText(e))) }
@@ -37,7 +37,7 @@ export function Auction({ snap }: { snap: HubSnapshot }) {
       </div>
       {err && <div className="note err" style={{ marginBottom: 14 }}>{err}</div>}
       {a.winner && <WinnerCard a={a} />}
-      <ControlCard a={a} cfg={snap.settings.auction} pending={pending.length} wrap={wrap} />
+      <ControlCard a={a} cfg={snap.settings.auction} pending={pending.length} wrap={wrap} toWheel={() => wrap(window.hub.wheelLoadLots(), () => go('wheel'))} />
       <div className="grid auc-grid">
         <LotsCard a={a} wrap={wrap} />
         <div className="auc-side">
@@ -70,7 +70,7 @@ function WinnerCard({ a }: { a: AuctionState }) {
   )
 }
 
-function ControlCard({ a, cfg, pending, wrap }: { a: AuctionState; cfg: AuctionSettings; pending: number; wrap: Wrap }) {
+function ControlCard({ a, cfg, pending, wrap, toWheel }: { a: AuctionState; cfg: AuctionSettings; pending: number; wrap: Wrap; toWheel: () => void }) {
   const now = useNow(250)
   const [confirmNew, setConfirmNew] = useState(false)
   const t = a.timer
@@ -104,6 +104,10 @@ function ControlCard({ a, cfg, pending, wrap }: { a: AuctionState; cfg: AuctionS
           <button className="btn" disabled={!top || top.rub <= 0} onClick={() => wrap(window.hub.aucFinish())}
             title={pending ? 'Сначала разберите очередь «Требует решения»' : 'Победит лот с наибольшей суммой'}>
             🏆 Объявить победителя
+          </button>
+          <button className="btn" disabled={a.lots.filter((l) => l.rub > 0).length < 2} onClick={toWheel}
+            title="Лоты со ставками попадут на колесо (шанс = сумма); победитель колеса станет победителем аукциона">
+            ◎ Итог колесом
           </button>
           {confirmNew ? (
             <>

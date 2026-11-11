@@ -17,6 +17,7 @@ import { YoutubeConnector } from './core/youtube'
 import { AlertEngine, fill, setVarsSource } from './core/alerts'
 import { Counters } from './core/counters'
 import { Auction } from './core/auction'
+import { Wheel } from './core/wheel'
 import { Profiles, type ProfilePart } from './core/profile'
 import { KickAuth } from './core/kickauth'
 import { StreamInfo, INFO_PLATFORMS, type InfoPlatform } from './core/streaminfo'
@@ -60,6 +61,7 @@ let templates: TemplateStore
 let rules: RuleEngine
 let counters: Counters
 let auction: Auction
+let wheel: Wheel
 let profiles: Profiles
 let kickAuth: KickAuth
 let streamInfo: StreamInfo
@@ -93,6 +95,7 @@ function snapshot(): HubSnapshot {
     streamInfo: streamInfo.state(),
     kickAuth: kickAuth.state(),
     auction: auction.state(),
+    wheel: wheel.state(),
     alertOverlays: server ? server.openCount('alert') : 0,
     float: { open: floatChat?.isOpen ?? false, editing: floatChat?.isEditing ?? false, hotkey: FLOAT_HOTKEY.replace('CommandOrControl', 'Ctrl') }
   }
@@ -232,6 +235,10 @@ app.whenReady().then(async () => {
   setVarsSource(() => counters.vars())
   auction = new Auction(store, settings, hub)
   auction.on('change', pushUpdate)
+  wheel = new Wheel(store, settings)
+  wheel.on('change', pushUpdate)
+  // Колесо крутили по лотам аукциона — победитель колеса становится победителем аукциона.
+  wheel.on('winner', (it: { lotId?: string }) => { if (it.lotId) auction.setWinner(it.lotId) })
   rules = new RuleEngine(hub, store, settings, templates, {
     play: (plan, e, force) => alerts.play(plan, e, force),
     obs: runObs,
@@ -256,7 +263,7 @@ app.whenReady().then(async () => {
   server = new OverlayServer(hub, store, settings, images, resourcesDir, app.getAppPath(), {
     send: (text) => chats.send(text, chats.states().filter((p) => p.canSend).map((p) => p.id), 'broadcaster'),
     pin: (id) => hub.togglePin(id)
-  }, { alerts, stats, sounds, media, tts, counters, auction })
+  }, { alerts, stats, sounds, media, tts, counters, auction, wheel })
   obs.onChange = pushUpdate
   server.onClients = pushUpdate
   floatChat = new FloatChat(settings, hub, () => server.overlayUrl('float'))
@@ -393,6 +400,12 @@ app.whenReady().then(async () => {
   handle('hub:aucFinish', () => auction.finish())
   handle('hub:aucReset', (keepLots) => auction.reset(keepLots === true))
   handle('hub:aucClearArchive', () => auction.clearArchive())
+  // ---------- Колесо ----------
+  handle('hub:wheelSetItems', (list) => wheel.setItems(list))
+  handle('hub:wheelLoadLots', () => wheel.loadLots(auction.state().lots))
+  handle('hub:wheelSpin', () => { wheel.spin() })
+  handle('hub:wheelRestart', () => wheel.restart())
+  handle('hub:wheelClearHistory', () => wheel.clearHistory())
   // ---------- Шаблоны алертов (конструктор) ----------
   handle('hub:templatePut', (t) => templates.put(t))
   handle('hub:templateRemove', (id) => {
@@ -529,6 +542,7 @@ app.on('before-quit', () => {
   for (const accel of ruleKeys.keys()) globalShortcut.unregister(accel)
   rules?.dispose()
   auction?.stop()
+  wheel?.stop()
   kickAuth?.cancelLogin()
   floatChat?.close()
   chats.stopAll()

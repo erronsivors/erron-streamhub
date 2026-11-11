@@ -12,6 +12,7 @@ import type { ProfileState } from './profile'
 import type { StreamInfoState } from './streaminfo'
 import type { KickAuthState } from './kickauth'
 import type { AuctionState } from './auction'
+import type { WheelState } from './wheel'
 
 export type Platform = 'twitch' | 'youtube' | 'vk' | 'kick' | 'goodgame' | 'donationalerts' | 'donatepay' | 'donatex' | 'boosty' | 'obs' | 'hub'
 
@@ -144,6 +145,7 @@ export interface HubSnapshot {
   streamInfo: StreamInfoState
   kickAuth: KickAuthState
   auction: AuctionState
+  wheel: WheelState
   /** Сколько копий оверлея «Алерты» сейчас открыто (0 — алерты и озвучку некому показать). */
   alertOverlays: number
   float: { open: boolean; editing: boolean; hotkey: string }

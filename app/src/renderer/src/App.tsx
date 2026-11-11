@@ -10,11 +10,12 @@ import { Settings } from './pages/Settings'
 import { Alerts } from './pages/Alerts'
 import { Rules } from './pages/Rules'
 import { Auction } from './pages/Auction'
+import { Wheel } from './pages/Wheel'
 import { Wizard } from './pages/Wizard'
 import { ModeContext } from './components'
 import { useNow, fmtDuration } from './ui'
 
-export type Page = 'home' | 'chat' | 'events' | 'alerts' | 'rules' | 'auction' | 'overlays' | 'connections' | 'settings'
+export type Page = 'home' | 'chat' | 'events' | 'alerts' | 'rules' | 'auction' | 'wheel' | 'overlays' | 'connections' | 'settings'
 
 const NAV: { id: Page; label: string; ico: string; soon?: boolean }[] = [
   { id: 'home', label: 'Главная', ico: '⌂' },
@@ -23,12 +24,13 @@ const NAV: { id: Page; label: string; ico: string; soon?: boolean }[] = [
   { id: 'alerts', label: 'Алерты', ico: '✦' },
   { id: 'rules', label: 'Правила', ico: '⇄' },
   { id: 'auction', label: 'Аукцион', ico: '◈' },
+  { id: 'wheel', label: 'Колесо', ico: '◎' },
   { id: 'overlays', label: 'Оверлеи', ico: '▣' },
   { id: 'connections', label: 'Подключения', ico: '⏚' },
   { id: 'settings', label: 'Настройки', ico: '⚙' }
 ]
 
-const LATER = ['Колесо', 'Таймер и сбор средств', 'Пульт со второго ПК']
+const LATER = ['Сбор средств', 'Розыгрыш', 'Пульт со второго ПК']
 
 export function App() {
   const [snap, setSnap] = useState<HubSnapshot | null>(null)
@@ -108,7 +110,8 @@ export function App() {
           {page === 'settings' && <Settings snap={snap} />}
           {page === 'alerts' && <Alerts snap={snap} />}
           {page === 'rules' && <Rules snap={snap} />}
-          {page === 'auction' && <Auction snap={snap} />}
+          {page === 'auction' && <Auction snap={snap} go={go} />}
+          {page === 'wheel' && <Wheel snap={snap} />}
         </main>
       </div>
       {snap.settings.setupMode === null && <Wizard />}

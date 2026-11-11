@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><title>Crossember · Колесо</title>
+<link rel="stylesheet" href="/a/overlay.css">
+<style>
+  #stage { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2vmin;
+    opacity: 0; transform: scale(.94); transition: opacity .45s ease, transform .45s cubic-bezier(.2, 1, .3, 1); }
+  #stage.show { opacity: 1; transform: none; }
+  #wrap { position: relative; width: 82vmin; height: 82vmin; }
+  #wrap.none { display: none; }
+  svg { width: 100%; height: 100%; overflow: visible; filter: drop-shadow(0 1vmin 3vmin rgba(0, 0, 0, .45)); }
+  .lbl { font: 800 7px 'Manrope', sans-serif; fill: #fff; paint-order: stroke; stroke: rgba(0, 0, 0, .35); stroke-width: .9px; }
+  .rim { fill: none; stroke: var(--edge); stroke-width: 2.2; }
+  .hub { fill: var(--card); stroke: var(--edge); stroke-width: 1.5; }
+  .ptr { fill: var(--fg); stroke: rgba(0, 0, 0, .4); stroke-width: .8; }
+  .win-seg { animation: glow 1s ease-in-out 3; }
+  @keyframes glow { 50% { filter: brightness(1.45); } }
+  #res { position: absolute; left: 50%; bottom: 5vmin; transform: translateX(-50%); width: max-content; max-width: 86vw; padding: .7em 1.4em; text-align: center; backdrop-filter: blur(10px); }
+  #res.none { display: none; }
+  #res .kick { display: block; font: 800 .55em 'Manrope', sans-serif; letter-spacing: .18em; text-transform: uppercase; color: var(--kicker); margin-bottom: .3em; }
+  #res .nm { font: 800 1.35em var(--title); line-height: 1.15; word-break: break-word; }
+  #res .sub { margin-top: .25em; font: 600 .6em 'Manrope', sans-serif; color: var(--muted); }
+  #res.pop { animation: pop .6s cubic-bezier(.2, 1.4, .4, 1); }
+  @keyframes pop { 0% { transform: translateX(-50%) scale(.85); opacity: 0; } 100% { transform: translateX(-50%); opacity: 1; } }
+</style></head>
+<body class="t-general" style="--fs: 34px"><div id="stage"><div id="wrap" class="none"></div><div id="res" class="card none"></div></div>
+<script src="/a/overlay.js"></script><script src="/a/wheel.js"></script>
+</body></html>

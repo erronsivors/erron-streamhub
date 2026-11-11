@@ -127,9 +127,13 @@ export interface AppSettings {
     counter: { theme: Theme; fontSize: number; ids: string[]; layout: 'column' | 'row' }
     /** Аукцион: сколько лотов, что показывать (сумму, долю или обе), таймер. */
     auction: { theme: Theme; fontSize: number; count: number; show: 'sum' | 'pct' | 'both'; showTimer: boolean }
+    /** Колесо: через сколько секунд после итога скрыть (0 — не скрывать). */
+    wheel: { theme: Theme; hideAfterSec: number }
   }
   float: FloatChatSettings
   auction: AuctionSettings
+  /** Колесо: режим, как считать сектора, длительность прокрутки. */
+  wheel: { mode: 'normal' | 'elim'; weighting: 'weight' | 'equal'; durationSec: number }
 }
 
 /** Правила аукциона (лоты и ставки хранятся отдельно, в auction.v1). */
@@ -204,10 +208,12 @@ export const DEFAULTS: AppSettings = {
     top: { theme: 'general', period: 'stream', count: 5, fontSize: 24 },
     last: { theme: 'general', fontSize: 26, showSub: true },
     counter: { theme: 'general', fontSize: 30, ids: [], layout: 'column' },
-    auction: { theme: 'general', fontSize: 24, count: 5, show: 'both', showTimer: true }
+    auction: { theme: 'general', fontSize: 24, count: 5, show: 'both', showTimer: true },
+    wheel: { theme: 'general', hideAfterSec: 10 }
   },
   float: { ...chatDefaults(false), fontSize: 18, maxMessages: 12, hideAfterSec: 45, showStatus: true, enabled: false, bgOpacity: 55, bounds: null },
-  auction: { pointsReward: '', pointsPerRub: 100, autoLotMin: 300, extend: true, extendBelowSec: 60, extendAddSec: 30, defaultMin: 10 }
+  auction: { pointsReward: '', pointsPerRub: 100, autoLotMin: 300, extend: true, extendBelowSec: 60, extendAddSec: 30, defaultMin: 10 },
+  wheel: { mode: 'normal', weighting: 'weight', durationSec: 8 }
 }
 
 const theme = (v: unknown, d: Theme): Theme => (v === 'general' || v === 'campfire' ? v : d)
@@ -371,6 +377,11 @@ export function sanitize(input: unknown, base: AppSettings = DEFAULTS): AppSetti
           theme: theme(o.theme, b.theme), fontSize: int(o.fontSize, b.fontSize, 12, 72), count: int(o.count, b.count, 1, 20),
           show: o.show === 'sum' || o.show === 'pct' || o.show === 'both' ? o.show : b.show, showTimer: bool(o.showTimer, b.showTimer)
         }
+      })(),
+      wheel: (() => {
+        const o = obj(ov.wheel)
+        const b = base.overlays.wheel ?? DEFAULTS.overlays.wheel
+        return { theme: theme(o.theme, b.theme), hideAfterSec: int(o.hideAfterSec, b.hideAfterSec, 0, 600) }
       })()
     },
     float: float(i.float, base.float ?? DEFAULTS.float),
@@ -385,6 +396,15 @@ export function sanitize(input: unknown, base: AppSettings = DEFAULTS): AppSetti
         extendBelowSec: int(o.extendBelowSec, b.extendBelowSec, 5, 600),
         extendAddSec: int(o.extendAddSec, b.extendAddSec, 5, 600),
         defaultMin: int(o.defaultMin, b.defaultMin, 1, 600)
+      }
+    })(),
+    wheel: (() => {
+      const o = obj(i.wheel)
+      const b = base.wheel ?? DEFAULTS.wheel
+      return {
+        mode: o.mode === 'normal' || o.mode === 'elim' ? o.mode : b.mode,
+        weighting: o.weighting === 'weight' || o.weighting === 'equal' ? o.weighting : b.weighting,
+        durationSec: int(o.durationSec, b.durationSec, 3, 60)
       }
     })()
   }

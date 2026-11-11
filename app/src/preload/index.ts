@@ -8,6 +8,7 @@ import type { AlertTemplate, ObsAction } from '../main/core/templates'
 import type { Rule } from '../main/core/rules'
 import type { Counter } from '../main/core/counters'
 import type { AuctionBet, AuctionLot, AuctionState } from '../main/core/auction'
+import type { WheelItem } from '../main/core/wheel'
 import type { ProfilePart, ProfileSummary } from '../main/core/profile'
 import type { ObsCatalog } from '../main/core/obs'
 import type { TtsVoice } from '../main/core/tts'
@@ -73,6 +74,11 @@ const api = {
   aucFinish: () => call<AuctionState['winner']>('hub:aucFinish'),
   aucReset: (keepLots: boolean) => call('hub:aucReset', keepLots),
   aucClearArchive: () => call('hub:aucClearArchive'),
+  wheelSetItems: (items: WheelItem[]) => call('hub:wheelSetItems', items),
+  wheelLoadLots: () => call<number>('hub:wheelLoadLots'),
+  wheelSpin: () => call('hub:wheelSpin'),
+  wheelRestart: () => call('hub:wheelRestart'),
+  wheelClearHistory: () => call('hub:wheelClearHistory'),
   templatePut: (t: AlertTemplate) => call<AlertTemplate>('hub:templatePut', t),
   templateRemove: (id: string) => call('hub:templateRemove', id),
   templateDuplicate: (id: string) => call<AlertTemplate | null>('hub:templateDuplicate', id),
