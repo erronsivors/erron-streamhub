@@ -13,11 +13,12 @@ import { Auction } from './pages/Auction'
 import { Wheel } from './pages/Wheel'
 import { Goal } from './pages/Goal'
 import { Giveaway } from './pages/Giveaway'
+import { Feedback } from './pages/Feedback'
 import { Wizard } from './pages/Wizard'
 import { ModeContext } from './components'
 import { useNow, fmtDuration } from './ui'
 
-export type Page = 'home' | 'chat' | 'events' | 'alerts' | 'rules' | 'auction' | 'wheel' | 'goal' | 'giveaway' | 'overlays' | 'connections' | 'settings'
+export type Page = 'home' | 'chat' | 'events' | 'alerts' | 'rules' | 'auction' | 'wheel' | 'goal' | 'giveaway' | 'overlays' | 'connections' | 'settings' | 'feedback'
 
 const NAV: { id: Page; label: string; ico: string; soon?: boolean }[] = [
   { id: 'home', label: 'Главная', ico: '⌂' },
@@ -85,6 +86,10 @@ export function App() {
               {l}
             </div>
           ))}
+          <button className={`nav nav-feedback ${page === 'feedback' ? 'on' : ''}`} onClick={() => go('feedback')}>
+            <span className="ico">✉</span>
+            Обратная связь
+          </button>
           <div className="side-foot">
             <span className={`dot ${snap.server ? 'ok' : 'error'}`} /> {snap.settings.setupMode === 'two' ? 'Режим: 2 ПК' : snap.settings.setupMode === 'one' ? 'Режим: 1 ПК' : 'Режим не выбран'} · всё локально
           </div>
@@ -106,6 +111,16 @@ export function App() {
             </div>
           </div>
 
+          {snap.feedback.crash && page !== 'feedback' && (
+            <div className="crash-bar">
+              <span className="grow">
+                <b>{snap.feedback.crash.previous ? 'Прошлый запуск Crossember закрылся неожиданно.' : 'В Crossember произошла ошибка.'}</b>{' '}
+                <span className="muted">Если что-то работает не так — сообщите автору, логи соберутся сами.</span>
+              </span>
+              <button className="btn sm primary" onClick={() => go('feedback')}>Сообщить об ошибке</button>
+              <button className="btn sm" onClick={() => void window.hub.crashDismiss()}>Скрыть</button>
+            </div>
+          )}
           {page === 'home' && <Home snap={snap} go={go} />}
           {page === 'chat' && <Chat snap={snap} />}
           {page === 'connections' && <Connections key={connSel ?? ""} snap={snap} initial={connSel} />}
@@ -118,6 +133,7 @@ export function App() {
           {page === 'wheel' && <Wheel snap={snap} />}
           {page === 'goal' && <Goal snap={snap} />}
           {page === 'giveaway' && <Giveaway snap={snap} />}
+          {page === 'feedback' && <Feedback snap={snap} />}
         </main>
       </div>
       {snap.settings.setupMode === null && <Wizard />}

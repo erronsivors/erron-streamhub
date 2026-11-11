@@ -1,5 +1,8 @@
-import { app, BrowserWindow, dialog, globalShortcut, ipcMain, session, shell, clipboard, type IpcMainInvokeEvent } from 'electron'
+import { app, BrowserWindow, dialog, globalShortcut, ipcMain, powerMonitor, session, shell, clipboard, type IpcMainInvokeEvent } from 'electron'
 import { join } from 'node:path'
+import { release } from 'node:os'
+import { Logger } from './core/logger'
+import { FEEDBACK_EMAIL, bundleText, composeUrls, sanitizeForm, writeBundle, type LogBundle, type SystemInfo } from './core/feedback'
 import { Store } from './core/db'
 import { Secrets } from './core/secrets'
 import { Hub } from './core/hub'
@@ -39,7 +42,41 @@ import type { StatsPeriod } from './core/settings'
 import type { HubEvent, HubSnapshot, Platform } from './core/types'
 
 // Один экземпляр приложения: второй запуск просто показывает окно.
-if (!app.requestSingleInstanceLock()) app.quit()
+const firstInstance = app.requestSingleInstanceLock()
+if (!firstInstance) app.quit()
+
+// Журнал на диске (только у первого экземпляра — второй сразу закрывается и метку запуска трогать не должен).
+const logger: Logger | null = firstInstance ? new Logger(join(app.getPath('userData'), 'logs')) : null
+const startedAt = Date.now()
+if (logger) {
+  logger.info('app', `Запуск Crossember ${app.getVersion()} · Electron ${process.versions.electron} · Windows ${release()} ${process.arch}`)
+  logger.onCrash = () => pushUpdate()
+  process.on('uncaughtException', (e) => logger.fatal('main', e))
+  process.on('unhandledRejection', (e) => logger.error('main', `Необработанная ошибка: ${e instanceof Error ? e.stack ?? e.message : String(e)}`))
+  // Ошибки и предупреждения из консоли — тоже в журнал.
+  for (const lvl of ['error', 'warn'] as const) {
+    const orig = console[lvl].bind(console)
+    console[lvl] = (...a: unknown[]) => {
+      orig(...a)
+      logger.write(lvl, 'console', a.map((x) => (x instanceof Error ? x.stack ?? x.message : typeof x === 'string' ? x : safeJson(x))).join(' '))
+    }
+  }
+  app.on('child-process-gone', (_e, d) => { if (d.reason !== 'clean-exit') logger.error('app', `Процесс ${d.type} завершился: ${d.reason} (код ${d.exitCode})`) })
+}
+function safeJson(x: unknown): string {
+  try { return JSON.stringify(x) } catch { return String(x) }
+}
+let lastBundle: LogBundle | null = null
+const sysInfo = (): SystemInfo => ({
+  version: app.getVersion(), electron: process.versions.electron, os: `Windows ${release()}`, arch: process.arch,
+  setupMode: settings?.get().setupMode ?? 'не выбран', uptimeMin: Math.round((Date.now() - startedAt) / 60000)
+})
+function collectLogs(): LogBundle {
+  if (!logger) throw new Error('Журнал недоступен')
+  lastBundle = writeBundle(app.getPath('downloads'), bundleText(sysInfo(), hub.connections(), logger))
+  logger.info('feedback', `Собран файл логов ${lastBundle.name}`)
+  return lastBundle
+}
 
 const isDev = !app.isPackaged && !!process.env.ELECTRON_RENDERER_URL
 const resourcesDir = app.isPackaged ? join(process.resourcesPath, 'resources') : join(app.getAppPath(), 'resources')
@@ -102,6 +139,7 @@ function snapshot(): HubSnapshot {
     wheel: wheel.state(),
     goal: goal.state(),
     giveaway: giveaway.state(),
+    feedback: { email: FEEDBACK_EMAIL, crash: logger?.crash() ?? null },
     alertOverlays: server ? server.openCount('alert') : 0,
     float: { open: floatChat?.isOpen ?? false, editing: floatChat?.isEditing ?? false, hotkey: FLOAT_HOTKEY.replace('CommandOrControl', 'Ctrl') }
   }
@@ -173,6 +211,15 @@ function createWindow(): void {
     }
   })
   win.once('ready-to-show', () => win?.show())
+  // Интерфейс упал — в журнал, плашка и перезагрузка (не больше трёх раз подряд).
+  let reloads = 0
+  win.webContents.on('render-process-gone', (_e, d) => {
+    if (d.reason === 'clean-exit') return
+    logger?.fatal('interface', new Error(`Интерфейс аварийно закрылся: ${d.reason} (код ${d.exitCode})`))
+    if (reloads++ < 3) win?.webContents.reload()
+  })
+  win.on('session-end', () => logger?.close())
+  win.webContents.on('unresponsive', () => logger?.warn('interface', 'Интерфейс не отвечает'))
 
   // Никаких переходов и новых окон внутри приложения; https-ссылки — во внешний браузер.
   win.webContents.setWindowOpenHandler(({ url }) => {
@@ -204,6 +251,7 @@ app.whenReady().then(async () => {
   const secrets = new Secrets(store)
   hub = new Hub()
   hub.register('hub', 'Сервер Crossember')
+  hub.on('log', (id: string, level: 'info' | 'warn' | 'error', text: string) => logger?.write(level, id, text))
   obs = new ObsConnector(hub, store, secrets)
   const images = new ImageCache(join(app.getPath('userData'), 'cache', 'img'))
   images.preconnect()
@@ -356,6 +404,26 @@ app.whenReady().then(async () => {
     pushUpdate()
   })
   handle('hub:copy', (text) => clipboard.writeText(str(text, 2000)))
+  // ---------- Журнал и обратная связь ----------
+  let uiErrors = 0
+  setInterval(() => { uiErrors = 0 }, 60_000)
+  handle('hub:logError', (text) => { if (++uiErrors <= 20) logger?.error('interface', str(text, 1500)) })
+  handle('hub:crashDismiss', () => { logger?.dismissCrash(); pushUpdate() })
+  handle('hub:feedbackCollect', () => collectLogs())
+  handle('hub:feedbackShowFile', () => { if (lastBundle) shell.showItemInFolder(lastBundle.path) })
+  handle('hub:feedbackOpenFile', () => { if (lastBundle) void shell.openPath(lastBundle.path) })
+  handle('hub:openLogsFolder', () => { if (logger) void shell.openPath(logger.dir) })
+  handle('hub:feedbackSend', async (form, via, withLogs) => {
+    const f = sanitizeForm(form)
+    if (!f.text) throw new Error('Напишите, что случилось или что предложить')
+    // Логи старше 10 минут собираем заново, чтобы в файл попало свежее.
+    const bundle = withLogs === true ? (lastBundle && Date.now() - lastBundle.createdAt < 600_000 ? lastBundle : collectLogs()) : null
+    const urls = composeUrls(f, sysInfo(), bundle)
+    await shell.openExternal(via === 'mailto' ? urls.mailto : urls.gmail)
+    if (bundle) shell.showItemInFolder(bundle.path)
+    logger?.info('feedback', `Открыто письмо (${via === 'mailto' ? 'почтовая программа' : 'Gmail'}, ${f.kind}${bundle ? ', с логами' : ''})`)
+    return bundle
+  })
   handle('hub:openExternal', (url) => {
     const u = str(url, 300)
     if (/^https:\/\/(dev\.twitch\.tv|www\.twitch\.tv|obsproject\.com|github\.com|console\.cloud\.google\.com|www\.donationalerts\.com|donatepay\.ru|donatex\.gg|boosty\.to)\//.test(u)) void shell.openExternal(u)
@@ -618,7 +686,12 @@ function syncHotkeys(): void {
   rules.setHotkeyErrors(errors)
 }
 
+// Выключение Windows — это нормальный выход, не «неожиданное закрытие».
+app.on('ready', () => powerMonitor.on('shutdown', () => logger?.close()))
+
 app.on('before-quit', () => {
+  logger?.info('app', 'Выход')
+  logger?.close()
   for (const accel of ruleKeys.keys()) globalShortcut.unregister(accel)
   rules?.dispose()
   auction?.stop()

@@ -1,5 +1,6 @@
 // Общие типы ядра. Те же типы использует интерфейс (через preload).
 import type { AppSettings } from './settings'
+import type { CrashInfo } from './logger'
 import type { ChatPlatformState } from './connector'
 import type { AlertQueueState } from './alerts'
 import type { DonationServiceState } from './donations/common'
@@ -152,6 +153,8 @@ export interface HubSnapshot {
   wheel: WheelState
   goal: GoalState
   giveaway: GiveawayState
+  /** Обратная связь: адрес автора и последняя серьёзная ошибка (для плашки «Сообщить об ошибке»). */
+  feedback: { email: string; crash: CrashInfo | null }
   /** Сколько копий оверлея «Алерты» сейчас открыто (0 — алерты и озвучку некому показать). */
   alertOverlays: number
   float: { open: boolean; editing: boolean; hotkey: string }

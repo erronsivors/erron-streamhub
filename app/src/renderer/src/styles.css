@@ -392,3 +392,12 @@ select.input { cursor: pointer; }
 .dock-card { margin-bottom: 18px; }
 .dock-card .seg { margin: 4px 0 2px; }
 .dock-blocks { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); margin-bottom: 14px; }
+
+/* Обратная связь */
+.nav-feedback { margin-top: auto; }
+.nav-feedback + .side-foot { margin-top: 6px; }
+.feedback textarea.input { resize: vertical; min-height: 140px; font: inherit; line-height: 1.45; }
+.feedback .list .row { padding: 6px 0; border-bottom: 1px solid var(--line); color: var(--ink-2); }
+.feedback .list .row:last-child { border-bottom: 0; }
+.crash-bar { display: flex; align-items: center; gap: 10px; margin: 0 0 18px; padding: 10px 14px; border-radius: 12px; background: #ff2d3c12; border: 1px solid #ff2d3c40; font-size: 13px; }
+.crash-bar .grow { flex: 1; min-width: 0; }

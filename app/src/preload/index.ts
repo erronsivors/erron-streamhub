@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
+import type { LogBundle } from '../main/core/feedback'
 import type { HubSnapshot } from '../main/core/types'
 import type { StatsSnapshot } from '../main/core/stats'
 import type { SoundInfo } from '../main/core/sounds'
@@ -25,6 +26,13 @@ const api = {
   obsConfigure: (url: string, password?: string) => call('hub:obsConfigure', url, password),
   obsReconnect: () => call('hub:obsReconnect'),
   rotateKey: (which: 'overlay' | 'remote' | 'dock') => call('hub:rotateKey', which),
+  logError: (text: string) => call('hub:logError', text),
+  crashDismiss: () => call('hub:crashDismiss'),
+  feedbackCollect: () => call<LogBundle>('hub:feedbackCollect'),
+  feedbackShowFile: () => call('hub:feedbackShowFile'),
+  feedbackOpenFile: () => call('hub:feedbackOpenFile'),
+  openLogsFolder: () => call('hub:openLogsFolder'),
+  feedbackSend: (form: { kind: string; text: string; contact: string }, via: 'gmail' | 'mailto', withLogs: boolean) => call<LogBundle | null>('hub:feedbackSend', form, via, withLogs),
   copy: (text: string) => call('hub:copy', text),
   openExternal: (url: string) => call('hub:openExternal', url),
   testEvent: (kind: 'donation' | 'bigdonation' | 'sub' | 'follow' | 'raid' | 'gift' | 'bits' | 'reward' | 'boosty' | 'message') => call('hub:testEvent', kind),

@@ -71,7 +71,7 @@ export class Hub extends EventEmitter {
     if (!c) return
     c.log.unshift({ ts: Date.now(), level, text: clean(text, 300) })
     if (c.log.length > LOG_LIMIT) c.log.length = LOG_LIMIT
-    this.emit('log')
+    this.emit('log', id, level, text)
   }
 
   connections(): ConnStatus[] {
