@@ -23,6 +23,7 @@ const api = {
   copy: (text: string) => call('hub:copy', text),
   openExternal: (url: string) => call('hub:openExternal', url),
   testEvent: (kind: 'donation' | 'bigdonation' | 'sub' | 'follow' | 'raid' | 'gift' | 'bits' | 'reward' | 'boosty' | 'message') => call('hub:testEvent', kind),
+  manualDonation: (d: { user: string; amount: number; currency: string; text: string; amountRub?: number }) => call('hub:manualDonation', d),
   alertPause: (v: boolean) => call('hub:alertPause', v),
   alertSkip: () => call('hub:alertSkip'),
   alertStopAll: () => call('hub:alertStopAll'),

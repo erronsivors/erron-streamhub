@@ -48,7 +48,37 @@ const CB = (() => {
     document.body.classList.add(t === 'campfire' ? 't-campfire' : 't-general');
   };
   const on = (kind, fn) => { handlers[kind] = fn; };
-  const api = { el, img, parts, line, theme, on, key, build: '', connect: null, send: null, ws: null };
+  const api = { el, img, parts, line, theme, on, key, build: '', connect: null, send: null, ws: null, visible: true, obs: !!window.obsstudio };
+
+  // Видимость: источник скрыт в OBS или вкладка браузера свёрнута — анимации и видео на паузу, связь остаётся.
+  let obsVisible = true;
+  let frozen = [];
+  const pauseAll = (hidden) => {
+    if (hidden) {
+      frozen = document.getAnimations().filter((a) => a.playState === 'running');
+      for (const v of document.querySelectorAll('video')) if (!v.paused) { v.pause(); frozen.push(v); }
+      for (const a of frozen) if (a.pause) a.pause();
+    } else {
+      for (const a of frozen) { const r = a.play(); if (r && r.catch) r.catch(() => {}); }
+      frozen = [];
+    }
+  };
+  const updateVisible = () => {
+    const v = obsVisible && !document.hidden;
+    if (v === api.visible) return;
+    api.visible = v;
+    // Оверлей может взять паузу на себя (алерты), иначе — общая пауза всего на странице.
+    if (handlers.visibility) handlers.visibility(v); else pauseAll(!v);
+    api.send({ kind: 'vis', visible: v });
+  };
+  window.addEventListener('obsSourceVisibleChanged', (e) => { obsVisible = !(e && e.detail && e.detail.visible === false); updateVisible(); });
+  document.addEventListener('visibilitychange', updateVisible);
+  api.pauseAll = pauseAll;
+
+  // Переподключение с растущей паузой: 1 → 2 → 4 … 30 с, со случайным разбросом ±30%,
+  // чтобы несколько оверлеев не стучались одновременно. Удачное подключение сбрасывает паузу.
+  let attempt = 0;
+  const retryDelay = () => Math.round(Math.min(30000, 1000 * Math.pow(2, attempt++)) * (0.7 + Math.random() * 0.6));
   api.connect = () => {
     const ov = (location.pathname.match(/^\/o\/([\w-]+)/) || [])[1] || '';
     const ws = new WebSocket('ws://' + location.host + '/ws?k=' + encodeURIComponent(key) + (ov ? '&o=' + ov : ''));
@@ -56,17 +86,24 @@ const CB = (() => {
       let d;
       try { d = JSON.parse(m.data); } catch { return; }
       // Новая версия Crossember — перезагрузить страницу, чтобы OBS взял свежий код оверлея.
-      if (d.kind === 'hello' && d.build) {
-        if (api.build && api.build !== d.build) { location.reload(); return; }
-        api.build = d.build;
+      if (d.kind === 'hello') {
+        attempt = 0;
+        if (d.build) {
+          if (api.build && api.build !== d.build) { location.reload(); return; }
+          api.build = d.build;
+        }
       }
       (handlers[d.kind] || (() => {}))(d);
     };
     ws.onclose = (c) => {
       (handlers.closed || (() => {}))(c);
-      if (c.code !== 4003) setTimeout(api.connect, 2000);
+      if (c.code !== 4003) setTimeout(api.connect, retryDelay());
     };
-    ws.onopen = () => (handlers.open || (() => {}))();
+    ws.onopen = () => {
+      // Сказать ядру, где открыта копия (OBS или браузер) и видна ли она: так выбирается «главная» копия алертов.
+      ws.send(JSON.stringify({ kind: 'hi', obs: api.obs, visible: api.visible }));
+      (handlers.open || (() => {}))();
+    };
     api.ws = ws;
   };
   api.send = (obj) => { if (api.ws && api.ws.readyState === 1) api.ws.send(JSON.stringify(obj)); };

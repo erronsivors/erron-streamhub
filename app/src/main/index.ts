@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, session, shell, clipboard, type IpcMainInvokeEvent } from 'electron'
+import { app, BrowserWindow, dialog, globalShortcut, ipcMain, session, shell, clipboard, type IpcMainInvokeEvent } from 'electron'
 import { join } from 'node:path'
 import { Store } from './core/db'
 import { Secrets } from './core/secrets'
@@ -208,8 +208,14 @@ app.whenReady().then(async () => {
   const runObs = (a: Parameters<ObsConnector['run']>[0], e: HubEvent): Promise<void> => obs.run(a, (s) => fill(s, e))
   alerts = new AlertEngine(hub, settings, tts, runObs)
   alerts.on('change', pushUpdate)
-  rules = new RuleEngine(hub, store, settings, templates, { play: (plan, e, force) => alerts.play(plan, e, force), obs: runObs })
-  rules.on('change', pushUpdate)
+  rules = new RuleEngine(hub, store, settings, templates, {
+    play: (plan, e, force) => alerts.play(plan, e, force),
+    obs: runObs,
+    isLive: () => obs.state.streaming || !!twitch?.live || !!youtube?.live
+  })
+  rules.on('change', () => { syncHotkeys(); pushUpdate() })
+  obs.onStream = (live) => rules.fireService(live ? 'stream_start' : 'stream_end')
+  syncHotkeys()
   stats = new Stats(store, () => (obs.state.streaming ? obs.state.streamStartedAt : null))
   sounds = new SoundLibrary(app.getPath('userData'), store)
   hub.seed(store.recentEvents(100))
@@ -266,6 +272,21 @@ app.whenReady().then(async () => {
   handle('hub:testEvent', (kind) => {
     const x = SAMPLES[String(kind)]
     if (x) hub.push(x)
+  })
+  // Ручной донат (наличные, перевод): как настоящий — лента, статистика, топы, правила; площадка «Вручную».
+  handle('hub:manualDonation', (v) => {
+    const o = (v && typeof v === 'object' ? v : {}) as Record<string, unknown>
+    const user = str(o.user, 64).trim()
+    const amount = typeof o.amount === 'number' && Number.isFinite(o.amount) ? Math.round(o.amount * 100) / 100 : 0
+    const currency = ['RUB', 'USD', 'EUR', 'UAH', 'KZT', 'BYN'].includes(o.currency as string) ? (o.currency as string) : 'RUB'
+    const rubRaw = typeof o.amountRub === 'number' && Number.isFinite(o.amountRub) ? Math.round(o.amountRub * 100) / 100 : 0
+    if (!user) throw new Error('Укажите имя')
+    if (!(amount > 0) || amount > 10_000_000) throw new Error('Сумма должна быть больше нуля')
+    hub.push({
+      platform: 'hub', type: 'donation', user, amount, currency, manual: true,
+      text: str(o.text, 500).trim() || undefined,
+      amountRub: currency === 'RUB' ? amount : rubRaw > 0 && rubRaw <= 100_000_000 ? rubRaw : undefined
+    })
   })
   // ---------- Алерты, статистика, звуки ----------
   handle('hub:alertPause', (v) => alerts.setPaused(v === true))
@@ -394,7 +415,30 @@ app.whenReady().then(async () => {
 })
 
 app.on('window-all-closed', () => app.quit())
+/** Горячие клавиши правил: занимаются глобально (работают, даже когда в фокусе игра). */
+const ruleKeys = new Map<string, string>()
+let ruleKeysSig = ''
+function syncHotkeys(): void {
+  const want = rules.hotkeys()
+  const sig = JSON.stringify(want)
+  if (sig === ruleKeysSig) return
+  ruleKeysSig = sig
+  for (const accel of ruleKeys.keys()) globalShortcut.unregister(accel)
+  ruleKeys.clear()
+  const errors: Record<string, string> = {}
+  const floatKey = FLOAT_HOTKEY.replace('CommandOrControl', 'Ctrl')
+  for (const { id, accel } of want) {
+    if (accel === floatKey) errors[id] = 'это сочетание занято плавающим чатом'
+    else if (ruleKeys.has(accel)) errors[id] = 'это сочетание уже у другого правила'
+    else if (globalShortcut.register(accel, () => rules.fireRule(id, 'hotkey'))) ruleKeys.set(accel, id)
+    else errors[id] = 'это сочетание занято другой программой'
+  }
+  rules.setHotkeyErrors(errors)
+}
+
 app.on('before-quit', () => {
+  for (const accel of ruleKeys.keys()) globalShortcut.unregister(accel)
+  rules?.dispose()
   floatChat?.close()
   chats.stopAll()
   for (const d of donations) d.stop()

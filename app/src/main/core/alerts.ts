@@ -6,6 +6,7 @@ import type { HubEvent, Platform } from './types'
 import type { AlertTemplate, Layer, ObsAction } from './templates'
 import type { RulePlan } from './rules'
 import { cleanForSpeech, type WindowsTts } from './tts'
+import { moneyWords, numberWords, numbersToWords, plural } from './ruwords'
 
 /** Кусок текста: обычный текст или сумма (выделяется цветом). */
 export type AlertTitlePart = { t: 'text' | 'amount'; v: string }
@@ -56,19 +57,7 @@ export const PLATFORM_NAMES: Record<Platform, string> = {
 
 const QUEUE_LIMIT = 100
 const CURRENCY: Record<string, string> = { RUB: '₽', USD: '$', EUR: '€', UAH: '₴', KZT: '₸', BYN: 'Br' }
-const CURRENCY_WORDS: Record<string, [string, string, string]> = {
-  RUB: ['рубль', 'рубля', 'рублей'], USD: ['доллар', 'доллара', 'долларов'], EUR: ['евро', 'евро', 'евро'],
-  UAH: ['гривна', 'гривны', 'гривен'], KZT: ['тенге', 'тенге', 'тенге'], BYN: ['белорусский рубль', 'белорусских рубля', 'белорусских рублей']
-}
-
-export function plural(n: number, one: string, few: string, many: string): string {
-  const a = Math.abs(Math.trunc(n)) % 100
-  const b = a % 10
-  if (a > 10 && a < 20) return many
-  if (b > 1 && b < 5) return few
-  if (b === 1) return one
-  return many
-}
+export { plural }
 
 export function money(amount: number, currency?: string): string {
   const sym = CURRENCY[currency ?? 'RUB'] ?? currency ?? ''
@@ -86,14 +75,16 @@ function amountText(e: HubEvent): string {
   }
 }
 
-/** Сумма для озвучки: «500 рублей» вместо «500 ₽». */
+/** Сумма для озвучки — словами: «пятьсот рублей», «одну подписку». */
 function amountSpoken(e: HubEvent): string {
-  if (e.type === 'donation' && e.amount) {
-    const w = CURRENCY_WORDS[e.currency ?? 'RUB']
-    const n = Math.round(e.amount * 100) / 100
-    return w ? `${n} ${Number.isInteger(n) ? plural(n, ...w) : w[1]}` : `${n} ${e.currency ?? ''}`
+  const n = e.amount ?? 0
+  if (!n) return amountText(e)
+  switch (e.type) {
+    case 'donation': return moneyWords(n, e.currency ?? 'RUB')
+    case 'bits': return `${numberWords(n)} ${plural(n, 'бит', 'бита', 'бит')}`
+    case 'gift': return `${n % 10 === 1 && n % 100 !== 11 ? numberWords(n, 'f').replace(/одна$/, 'одну') : numberWords(n, 'f')} ${plural(n, 'подписку', 'подписки', 'подписок')}`
+    default: return numberWords(n)
   }
-  return amountText(e)
 }
 
 const PLACEHOLDER = /(\{user\}|\{amount\}|\{message\}|\{platform\})/
@@ -136,6 +127,8 @@ interface Entry {
 export class AlertEngine extends EventEmitter {
   private queue: Entry[] = []
   private current: Entry | null = null
+  /** Когда начался текущий алерт (для оверлея, подключившегося посреди показа). */
+  private startedAt = 0
   private paused = false
   private playTimer: NodeJS.Timeout | null = null
   private gapTimer: NodeJS.Timeout | null = null
@@ -157,6 +150,11 @@ export class AlertEngine extends EventEmitter {
       current: this.current?.item ?? null,
       queue: this.queue.slice(0, 30).map((q) => q.item)
     }
+  }
+
+  /** Что показывается сейчас и с какого момента. */
+  nowPlaying(): { item: AlertItem; at: number } | null {
+    return this.current ? { item: this.current.item, at: this.startedAt } : null
   }
 
   /** Исполнитель правил: первый шаблон получает озвучку и звуки правил, без шаблона они играют отдельно. */
@@ -233,7 +231,8 @@ export class AlertEngine extends EventEmitter {
     for (const l of layers) {
       try {
         const msg = cleanForSpeech(e.text ?? '', { stripLinks: s.stripLinks, badWords: s.badWords, maxChars: s.maxChars })
-        const text = cleanForSpeech(fill(l.text, { ...e, user: cleanForSpeech(e.user, { stripLinks: false, badWords: s.badWords, maxChars: 40 }) }, msg, amountSpoken(e)),
+        // Все числа — словами (сумма уже словами в нужном роде): «лови 300» → «лови триста».
+        const text = cleanForSpeech(numbersToWords(fill(l.text, { ...e, user: cleanForSpeech(e.user, { stripLinks: false, badWords: s.badWords, maxChars: 40 }) }, msg, amountSpoken(e))),
           { stripLinks: false, badWords: '', maxChars: 800 })
         if (!text) throw new Error('нечего читать')
         const r = await this.tts.synth(text, l.voice || s.voice, l.rate || s.rate)
@@ -251,6 +250,7 @@ export class AlertEngine extends EventEmitter {
     if (!this.queue[0].ready) return
     const entry = this.queue.shift()!
     this.current = entry
+    this.startedAt = Date.now()
     this.emit('play', entry.item)
     this.emit('change')
     for (const l of entry.item.layers) {

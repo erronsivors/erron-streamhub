@@ -112,6 +112,8 @@ export class OverlayServer {
   private sockets = new Map<WebSocket, Kind>()
   /** Какой оверлей открыт в каком сокете (чтобы знать, есть ли кому показать алерт). */
   private socketOverlay = new Map<WebSocket, string>()
+  /** Где открыта копия оверлея и видна ли она — для выбора «главной» копии алертов (она одна играет звук). */
+  private socketMeta = new Map<WebSocket, { obs: boolean; visible: boolean; since: number; main: boolean | null }>()
   /** Изменилось число открытых оверлеев. */
   onClients: () => void = () => undefined
   private overlayKey: string
@@ -139,7 +141,7 @@ export class OverlayServer {
     hub.on('delete', (d: unknown) => this.broadcast({ kind: 'delete', ...(d as object) }))
     hub.on('pinned', (m: HubEvent | null) => this.broadcast({ kind: 'pinned', event: m }))
     // Алерты идут только в оверлеи (local), пульту второго ПК они не нужны.
-    extras.alerts.on('play', (a: AlertItem) => this.broadcast({ kind: 'alert', alert: a }, 'local'))
+    extras.alerts.on('play', (a: AlertItem) => this.broadcast({ kind: 'alert', alert: a, at: Date.now() }, 'local'))
     extras.alerts.on('end', (id: string) => this.broadcast({ kind: 'alert-end', id }, 'local'))
     hub.on('event', (e: HubEvent) => {
       if (e.type !== 'message' && e.type !== 'system' && !e.test) this.pushStats()
@@ -189,7 +191,28 @@ export class OverlayServer {
     for (const [s, kind] of this.sockets) if ((!only || kind === only) && s.readyState === s.OPEN) s.send(data)
   }
 
-  private hello(kind: Kind): string {
+  /**
+   * Выбрать «главную» копию оверлея «Алерты»: видимая важнее скрытой, OBS важнее браузера, при равенстве — открытая раньше.
+   * Только она играет звук и озвучку, остальные показывают молча.
+   */
+  private electMain(): void {
+    let best: WebSocket | null = null
+    for (const [sock, ov] of this.socketOverlay) {
+      if (ov !== 'alert') continue
+      const m = this.socketMeta.get(sock)
+      if (!m) continue
+      const b = best ? this.socketMeta.get(best)! : null
+      if (!b || (m.visible !== b.visible ? m.visible : m.obs !== b.obs ? m.obs : m.since < b.since)) best = sock
+    }
+    for (const [sock, m] of this.socketMeta) {
+      const main = sock === best
+      if (main === m.main) continue
+      m.main = main
+      if (sock.readyState === sock.OPEN) sock.send(JSON.stringify({ kind: 'role', main }))
+    }
+  }
+
+  private hello(kind: Kind, ov = ''): string {
     const s = this.settings.get()
     return JSON.stringify({
       kind: 'hello',
@@ -199,7 +222,9 @@ export class OverlayServer {
       chat: this.hub.recentChat().slice(0, 50),
       events: kind === 'lan' ? this.hub.recent().slice(0, 30) : [],
       pinned: this.hub.pinned,
-      ...(kind === 'local' ? { stats: this.statsData() } : {})
+      ...(kind === 'local' ? { stats: this.statsData() } : {}),
+      // Снимок для оверлея алертов после (пере)подключения: что идёт сейчас и с какого момента.
+      ...(ov === 'alert' ? { alert: this.extras.alerts.nowPlaying() } : {})
     })
   }
 
@@ -291,11 +316,36 @@ export class OverlayServer {
       socket.on('close', () => {
         this.sockets.delete(socket)
         this.socketOverlay.delete(socket)
+        if (this.socketMeta.delete(socket)) this.electMain()
         this.onClients()
       })
-      socket.send(this.hello(kind))
+      socket.send(this.hello(kind, ov))
       if (kind === 'local') {
-        socket.on('message', () => undefined) // оверлеи только слушают
+        // Оверлеи только слушают; единственное, что они сообщают, — где открыты и видны ли (для оверлея «Алерты»).
+        if (ov !== 'alert') {
+          socket.on('message', () => undefined)
+          return
+        }
+        let count = 0
+        const since = Date.now()
+        const reset = setInterval(() => { count = 0 }, 10_000)
+        socket.on('close', () => clearInterval(reset))
+        socket.on('message', (raw: Buffer) => {
+          if (++count > 30 || raw.length > 200) return
+          let m: { kind?: unknown; obs?: unknown; visible?: unknown }
+          try {
+            m = JSON.parse(raw.toString('utf8'))
+          } catch {
+            return
+          }
+          // main: null — роль этой копии ещё не сообщали.
+          const meta = this.socketMeta.get(socket) ?? { obs: false, visible: true, since, main: null }
+          if (m.kind === 'hi') meta.obs = m.obs === true
+          else if (m.kind !== 'vis') return
+          if (typeof m.visible === 'boolean') meta.visible = m.visible
+          this.socketMeta.set(socket, meta)
+          this.electMain()
+        })
         return
       }
       // Пульт второго ПК: только два действия, с ограничением частоты.

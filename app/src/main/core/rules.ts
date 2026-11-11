@@ -15,9 +15,15 @@ import {
  * Правила проверяются сверху вниз; «стоп» — следующие правила для этого события не проверяются.
  */
 
-export const TRIGGER_TYPES = ['donation', 'sub', 'gift', 'follow', 'raid', 'bits', 'reward', 'message'] as const
+export const TRIGGER_TYPES = ['donation', 'sub', 'gift', 'follow', 'raid', 'bits', 'reward', 'message', 'stream_start', 'stream_end', 'timer', 'hotkey'] as const
 export type TriggerType = (typeof TRIGGER_TYPES)[number]
-const PLATFORMS: Platform[] = ['twitch', 'youtube', 'vk', 'kick', 'goodgame', 'donationalerts', 'donatepay', 'donatex', 'boosty']
+/** Служебные поводы: не события зрителей, а эфир, таймер и горячая клавиша. Условия и площадки к ним не применяются. */
+export const SERVICE_TRIGGERS = ['stream_start', 'stream_end', 'timer', 'hotkey'] as const
+export type ServiceTrigger = (typeof SERVICE_TRIGGERS)[number]
+const SERVICE_USER: Record<ServiceTrigger, string> = { stream_start: 'Эфир начался', stream_end: 'Эфир закончился', timer: 'Таймер', hotkey: 'Горячая клавиша' }
+/** Горячая клавиша: Ctrl/Alt/Shift + буква, цифра, F1–F24 или цифра доп. клавиатуры; без модификатора — только F-клавиши. */
+export const HOTKEY_RE = /^(?:(?:Ctrl|Alt|Shift)\+){1,3}(?:[A-Z0-9]|F(?:[1-9]|1\d|2[0-4])|num[0-9])$|^F(?:[1-9]|1\d|2[0-4])$/
+const PLATFORMS: Platform[] = ['twitch', 'youtube', 'vk', 'kick', 'goodgame', 'donationalerts', 'donatepay', 'donatex', 'boosty', 'hub']
 
 export interface RuleFilter {
   /** Сумма от (₽ для донатов, биты, зрители рейда…); 0 — не важно. */
@@ -52,6 +58,12 @@ export interface Rule {
   cooldownPerUser: boolean
   stop: boolean
   actions: RuleAction[]
+  /** Повод «каждые N минут»: интервал. */
+  intervalMin: number
+  /** Повод «каждые N минут»: только пока идёт эфир. */
+  onlyLive: boolean
+  /** Повод «горячая клавиша»: сочетание в формате Electron (Ctrl+Shift+1). */
+  hotkey: string
 }
 
 export interface RuleLogEntry {
@@ -60,7 +72,7 @@ export interface RuleLogEntry {
   ruleName: string
   user: string
   platform: Platform
-  type: HubEventType
+  type: HubEventType | TriggerType
   result: 'done' | 'dry' | 'cooldown' | 'error' | 'test'
   detail: string
 }
@@ -70,6 +82,8 @@ export interface RulesState {
   dryRun: boolean
   rules: Rule[]
   log: RuleLogEntry[]
+  /** Горячие клавиши, которые не удалось занять: id правила → причина. */
+  hotkeyErrors: Record<string, string>
 }
 
 /** Что делать с событием: собрано по всем подошедшим правилам. */
@@ -84,6 +98,8 @@ export interface RulePlan {
 export interface RuleRunner {
   play(plan: RulePlan, e: HubEvent, force: boolean): void
   obs(a: ObsAction, e: HubEvent): Promise<void>
+  /** Идёт ли эфир (для таймеров «только во время эфира»). */
+  isLive(): boolean
 }
 
 const LOG_LIMIT = 200
@@ -120,7 +136,10 @@ export function sanitizeRule(v: unknown): Rule {
     cooldownSec: num(o.cooldownSec, 0, 0, 86_400),
     cooldownPerUser: bool(o.cooldownPerUser, false),
     stop: bool(o.stop, false),
-    actions: (Array.isArray(o.actions) ? o.actions : []).slice(0, 20).map(sanitizeAction).filter((a): a is RuleAction => !!a)
+    actions: (Array.isArray(o.actions) ? o.actions : []).slice(0, 20).map(sanitizeAction).filter((a): a is RuleAction => !!a),
+    intervalMin: num(o.intervalMin, 15, 1, 720),
+    onlyLive: bool(o.onlyLive, true),
+    hotkey: typeof o.hotkey === 'string' && HOTKEY_RE.test(o.hotkey) ? o.hotkey : ''
   }
 }
 
@@ -196,6 +215,11 @@ export class RuleEngine extends EventEmitter {
   private dryRun: boolean
   private log: RuleLogEntry[] = []
   private lastFire = new Map<string, number>()
+  /** Таймеры «каждые N минут»: id правила → когда сработать. */
+  private nextAt = new Map<string, number>()
+  private tick: NodeJS.Timeout
+  private wasLive = false
+  private hotkeyErrors: Record<string, string> = {}
 
   constructor(private hub: Hub, private store: Store, private settings: Settings, private templates: TemplateStore, private runner: RuleRunner) {
     super()
@@ -210,10 +234,58 @@ export class RuleEngine extends EventEmitter {
     this.enabled = bool(flags.enabled, true)
     this.dryRun = bool(flags.dryRun, false)
     hub.on('event', (e: HubEvent) => this.handle(e))
+    this.tick = setInterval(() => this.timers(), 5000)
   }
 
   state(): RulesState {
-    return { enabled: this.enabled, dryRun: this.dryRun, rules: this.rules, log: this.log.slice(0, 60) }
+    return { enabled: this.enabled, dryRun: this.dryRun, rules: this.rules, log: this.log.slice(0, 60), hotkeyErrors: this.hotkeyErrors }
+  }
+
+  dispose(): void {
+    clearInterval(this.tick)
+  }
+
+  /** Горячие клавиши включённых правил — их занимает index.ts. */
+  hotkeys(): { id: string; accel: string }[] {
+    return this.rules.filter((r) => r.enabled && r.types.includes('hotkey') && r.hotkey).map((r) => ({ id: r.id, accel: r.hotkey }))
+  }
+
+  setHotkeyErrors(errors: Record<string, string>): void {
+    if (JSON.stringify(errors) === JSON.stringify(this.hotkeyErrors)) return
+    this.hotkeyErrors = errors
+    this.emit('change')
+  }
+
+  /** «Каждые N минут»: первый раз — через N минут после включения правила (или начала эфира). */
+  private timers(): void {
+    const now = Date.now()
+    const live = this.runner.isLive()
+    if (live && !this.wasLive) this.nextAt.clear()
+    this.wasLive = live
+    for (const r of this.rules) {
+      if (!r.enabled || !r.types.includes('timer') || (r.onlyLive && !live)) { this.nextAt.delete(r.id); continue }
+      const at = this.nextAt.get(r.id)
+      if (at === undefined) this.nextAt.set(r.id, now + r.intervalMin * 60_000)
+      else if (now >= at) {
+        this.nextAt.set(r.id, now + r.intervalMin * 60_000)
+        this.fireRule(r.id, 'timer')
+      }
+    }
+  }
+
+  /** Событие-заглушка для служебного повода: в ленту не попадает, нужно только для действий и журнала. */
+  private serviceEvent(kind: ServiceTrigger): HubEvent {
+    return { id: randomUUID(), ts: Date.now(), platform: kind === 'stream_start' || kind === 'stream_end' ? 'obs' : 'hub', type: 'system', user: SERVICE_USER[kind] }
+  }
+
+  /** Эфир начался / закончился: все подходящие правила сверху вниз (со «стоп» и кулдауном). */
+  fireService(kind: 'stream_start' | 'stream_end'): void {
+    this.process(this.serviceEvent(kind), (r) => r.types.includes(kind), kind)
+  }
+
+  /** Таймер или горячая клавиша конкретного правила. */
+  fireRule(ruleId: string, kind: 'timer' | 'hotkey'): void {
+    this.process(this.serviceEvent(kind), (r) => r.id === ruleId && r.types.includes(kind), kind)
   }
 
   private save(): void {
@@ -232,6 +304,7 @@ export class RuleEngine extends EventEmitter {
   put(v: unknown): Rule {
     const r = sanitizeRule(v)
     const i = this.rules.findIndex((x) => x.id === r.id)
+    this.nextAt.delete(r.id) // таймер правила считается заново
     if (i >= 0) this.rules[i] = r
     else {
       if (this.rules.length >= 200) throw new Error('Слишком много правил (максимум 200)')
@@ -270,8 +343,8 @@ export class RuleEngine extends EventEmitter {
     if (changed) this.save()
   }
 
-  private addLog(r: Rule, e: HubEvent, result: RuleLogEntry['result'], detail: string): void {
-    this.log.unshift({ ts: Date.now(), ruleId: r.id, ruleName: r.name, user: e.user, platform: e.platform, type: e.type, result, detail })
+  private addLog(r: Rule, e: HubEvent, result: RuleLogEntry['result'], detail: string, type: RuleLogEntry['type'] = e.type): void {
+    this.log.unshift({ ts: Date.now(), ruleId: r.id, ruleName: r.name, user: e.user, platform: e.platform, type, result, detail })
     if (this.log.length > LOG_LIMIT) this.log.length = LOG_LIMIT
   }
 
@@ -306,26 +379,32 @@ export class RuleEngine extends EventEmitter {
   }
 
   private handle(e: HubEvent): void {
-    if (e.type === 'system' || !this.enabled) return
+    if (e.type === 'system') return
+    this.process(e, (r) => matches(r, e), e.type)
+  }
+
+  /** Пройти правила сверху вниз: pick — подходит ли правило к этому поводу. */
+  private process(e: HubEvent, pick: (r: Rule) => boolean, type: RuleLogEntry['type']): void {
+    if (!this.enabled) return
     const plan: RulePlan = { templates: [], extras: [], obs: [] }
     const now = Date.now()
     let any = false
     for (const r of this.rules) {
-      if (!r.enabled || !matches(r, e)) continue
+      if (!r.enabled || !pick(r)) continue
       const key = r.cooldownPerUser ? `${r.id}:${e.platform}:${e.user.toLowerCase()}` : r.id
       const last = this.lastFire.get(key) ?? 0
       if (r.cooldownSec > 0 && now - last < r.cooldownSec * 1000) {
-        this.addLog(r, e, 'cooldown', `кулдаун: ещё ${Math.ceil((r.cooldownSec * 1000 - (now - last)) / 1000)} с`)
+        this.addLog(r, e, 'cooldown', `кулдаун: ещё ${Math.ceil((r.cooldownSec * 1000 - (now - last)) / 1000)} с`, type)
         any = true
         if (r.stop) break
         continue
       }
       any = true
-      if (this.dryRun) this.addLog(r, e, 'dry', `сработало бы: ${this.describe(r)}`)
+      if (this.dryRun) this.addLog(r, e, 'dry', `сработало бы: ${this.describe(r)}`, type)
       else {
         this.lastFire.set(key, now)
         this.collect(r, plan)
-        this.addLog(r, e, 'done', this.describe(r))
+        this.addLog(r, e, 'done', this.describe(r), type)
       }
       if (r.stop) break
     }

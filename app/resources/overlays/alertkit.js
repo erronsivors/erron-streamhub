@@ -114,7 +114,7 @@
       const m = el(l.type === 'image' ? 'img' : 'video', 'ak-media');
       m.style.objectFit = l.fit === 'cover' || l.fit === 'fill' ? l.fit : 'contain';
       if (l.type === 'video') {
-        m.muted = !(l.vol > 0) || !!opts.paused;
+        m.muted = !(l.vol > 0) || !!opts.paused || (opts.canSound ? !opts.canSound() : false);
         m.volume = Math.min(1, Math.max(0, num(l.vol, 0)));
         m.loop = !!l.loop;
         m.playsInline = true;
@@ -130,8 +130,9 @@
 
   /**
    * Показать алерт на сцене. opts: url(src) → полный адрес; theme; paused (для перемотки в редакторе);
-   * playBuiltin(id, volume) — встроенные звуки; editor — подсказки в пустых слоях.
-   * Возвращает { seek(t), stop(), duration }.
+   * playBuiltin(id, volume) — встроенные звуки; editor — подсказки в пустых слоях;
+   * canSound() — можно ли сейчас играть звук (оверлей: только «главная» видимая копия и не опоздавший алерт).
+   * Возвращает { seek(t), pause(), resume(t), stop(), duration }.
    */
   function mount(stage, item, opts) {
     opts = opts || {};
@@ -146,15 +147,18 @@
     const media = [];
     const sounds = [];
     let stopped = false;
+    let held = false;
+    // Оверлей подключился посреди алерта: таймеры звуков и видео — от этого места, начавшееся раньше не запускается.
+    const off = Math.max(0, num(opts.offset, 0));
 
     for (const l of item.layers || []) {
       const start = num(l.start, 0);
       const dur = layerDur(l, total);
       if (dur <= 0) continue;
       if (l.type === 'sound' || l.type === 'tts') {
-        if (opts.paused) continue;
+        if (opts.paused || start < off) continue;
         timers.push(setTimeout(() => {
-          if (stopped) return;
+          if (stopped || held || (opts.canSound && !opts.canSound())) return;
           const vol = Math.min(1, Math.max(0, num(l.vol, 0)));
           if (!(vol > 0)) return;
           if (l.builtin && opts.playBuiltin) return opts.playBuiltin(l.builtin, vol);
@@ -164,7 +168,7 @@
             a.play().catch(() => {});
             sounds.push(a);
           }
-        }, start));
+        }, start - off));
         continue;
       }
       if (l.type === 'obs') continue;
@@ -205,7 +209,7 @@
       const vid = inner.querySelector('video');
       if (vid) {
         media.push({ v: vid, start });
-        if (!opts.paused) timers.push(setTimeout(() => { if (!stopped) { vid.currentTime = 0; vid.play().catch(() => {}); } }, start));
+        if (!opts.paused && start >= off) timers.push(setTimeout(() => { if (!stopped && !held) { vid.currentTime = 0; vid.play().catch(() => {}); } }, start - off));
       }
     }
 
@@ -220,6 +224,27 @@
           if (isFinite(m.v.duration) && m.v.duration > 0) m.v.currentTime = m.v.loop ? local % m.v.duration : Math.min(local, m.v.duration - 0.05);
         }
       },
+      /** Пауза (источник скрыт): движение и видео стоят, звук не начинается. */
+      pause() {
+        held = true;
+        for (const a of anims) a.pause();
+        for (const m of media) m.v.pause();
+        for (const a of sounds) a.pause();
+      },
+      /** Продолжить с момента t (сколько прошло от начала алерта по часам ядра). */
+      resume(t) {
+        held = false;
+        for (const a of anims) { a.currentTime = Math.max(0, t); a.play(); }
+        for (const m of media) {
+          if (t < m.start) continue;
+          const local = (t - m.start) / 1000;
+          if (isFinite(m.v.duration) && m.v.duration > 0) {
+            if (!m.v.loop && local >= m.v.duration) continue;
+            m.v.currentTime = m.v.loop ? local % m.v.duration : local;
+          }
+          m.v.play().catch(() => {});
+        }
+      },
       stop() {
         stopped = true;
         for (const t of timers) clearTimeout(t);
@@ -230,6 +255,7 @@
       }
     };
     if (opts.paused) handle.seek(num(opts.startAt, 0));
+    else if (off > 0) handle.resume(off);
     return handle;
   }
 

@@ -27,6 +27,11 @@
 .rule-flow .lbl { font: 600 11px var(--f-text); color: var(--muted-2); text-transform: uppercase; letter-spacing: .08em; margin-right: 2px; }
 .rule-flow .arrow { color: var(--muted-2); margin: 0 4px; }
 .rule-meta { margin-top: 7px; font-size: 12px; color: var(--muted-2); }
+.rule-meta.warn { color: var(--warn); }
+.chips-label { font-size: 12px; color: var(--muted-2); letter-spacing: .04em; margin: 4px 0 7px; }
+.hotkey { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.hotkey-box { min-width: 190px; text-align: left; cursor: pointer; color: var(--ink); }
+.hotkey-box.rec { border-color: var(--light); color: var(--light); }
 .rule-tools { display: flex; gap: 6px; flex: none; }
 @media (max-width: 900px) { .rule { flex-wrap: wrap; } .rule-tools { width: 100%; justify-content: flex-end; } }
 .pill { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; background: var(--coal-3); border: 1px solid var(--line-2); font-size: 12.5px; font-weight: 600; color: var(--ink-2); max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

@@ -38,6 +38,8 @@ export interface HubEvent {
   amountRub?: number
   /** Тестовое событие: показывается в оверлеях, но не идёт в статистику. */
   test?: boolean
+  /** Донат, добавленный вручную (наличные, перевод). В базе такие события — с площадкой hub. */
+  manual?: boolean
 }
 
 export type ConnState = 'off' | 'connecting' | 'ok' | 'error'

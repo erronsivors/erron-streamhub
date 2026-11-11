@@ -31,6 +31,8 @@ export class ObsConnector {
   private reverts = new Map<string, { timer: NodeJS.Timeout; restore: () => Promise<unknown> }>()
   state: ObsState = { connected: false, scene: null, streaming: false, streamStartedAt: null, recording: false, resolution: null, fps: null }
   onChange: () => void = () => undefined
+  /** Эфир начался (true) или закончился (false) — по событию OBS, не при подключении к уже идущему эфиру. */
+  onStream: (live: boolean) => void = () => undefined
 
   constructor(private hub: Hub, private store: Store, private secrets: Secrets) {
     hub.register('obs', 'OBS Studio')
@@ -40,8 +42,14 @@ export class ObsConnector {
       this.scheduleRetry(err.code === 4009 ? 'Неверный пароль OBS WebSocket' : 'OBS недоступен — переподключение…')
     })
     this.obs.on('CurrentProgramSceneChanged', ({ sceneName }) => this.patch({ scene: sceneName }))
-    this.obs.on('StreamStateChanged', ({ outputActive }) =>
-      this.patch({ streaming: outputActive, streamStartedAt: outputActive ? Date.now() : null }))
+    // Только окончательные состояния: «запускается» и «останавливается» пропускаем, чтобы не сбить время начала эфира.
+    this.obs.on('StreamStateChanged', ({ outputState }) => {
+      if (outputState !== 'OBS_WEBSOCKET_OUTPUT_STARTED' && outputState !== 'OBS_WEBSOCKET_OUTPUT_STOPPED') return
+      const live = outputState === 'OBS_WEBSOCKET_OUTPUT_STARTED'
+      if (live === this.state.streaming) return
+      this.patch({ streaming: live, streamStartedAt: live ? Date.now() : null })
+      this.onStream(live)
+    })
     this.obs.on('RecordStateChanged', ({ outputActive }) => this.patch({ recording: outputActive }))
   }
 

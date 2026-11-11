@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react'
+import { useState, type ReactNode, type KeyboardEvent } from 'react'
 import type { HubSnapshot, Platform } from '../../../main/core/types'
 import type { Rule, RuleAction, TriggerType } from '../../../main/core/rules'
 import type { ObsAction } from '../../../main/core/templates'
@@ -6,15 +6,18 @@ import { Hint, Toggle, errText } from '../components'
 import { PlatIcon, fmtTime } from '../ui'
 import { ObsActionEditor, SoundSelect, VoiceSelect, previewSound, previewTts } from '../editors'
 
-export const TRIGGERS: { id: TriggerType; label: string; ico: string }[] = [
+export const TRIGGERS: { id: TriggerType; label: string; ico: string; service?: boolean }[] = [
   { id: 'donation', label: 'Донат', ico: '₽' }, { id: 'sub', label: 'Подписка', ico: '★' }, { id: 'gift', label: 'Подарки', ico: '🎁' },
   { id: 'follow', label: 'Фоллоу', ico: '♥' }, { id: 'raid', label: 'Рейд', ico: '↗' }, { id: 'bits', label: 'Биты', ico: '◆' },
-  { id: 'reward', label: 'Баллы', ico: '✦' }, { id: 'message', label: 'Сообщение в чате', ico: '💬' }
+  { id: 'reward', label: 'Баллы', ico: '✦' }, { id: 'message', label: 'Сообщение в чате', ico: '💬' },
+  { id: 'stream_start', label: 'Эфир начался', ico: '▶', service: true }, { id: 'stream_end', label: 'Эфир закончился', ico: '■', service: true },
+  { id: 'timer', label: 'Каждые N минут', ico: '⏱', service: true }, { id: 'hotkey', label: 'Горячая клавиша', ico: '⌨', service: true }
 ]
+const isService = (t: TriggerType): boolean => !!TRIGGERS.find((x) => x.id === t)?.service
 const PLATFORMS: { id: Platform; label: string }[] = [
   { id: 'twitch', label: 'Twitch' }, { id: 'youtube', label: 'YouTube' }, { id: 'vk', label: 'VK' }, { id: 'kick', label: 'Kick' },
   { id: 'goodgame', label: 'GoodGame' }, { id: 'donationalerts', label: 'DonationAlerts' }, { id: 'donatepay', label: 'DonatePay' },
-  { id: 'donatex', label: 'DonateX' }, { id: 'boosty', label: 'Boosty' }
+  { id: 'donatex', label: 'DonateX' }, { id: 'boosty', label: 'Boosty' }, { id: 'hub', label: 'Вручную' }
 ]
 const ACTIONS: { type: RuleAction['type']; ico: string; title: string; desc: string }[] = [
   { type: 'alert', ico: '✦', title: 'Показать алерт', desc: 'Шаблон из раздела «Алерты»' },
@@ -27,8 +30,54 @@ const AMOUNT_TYPES: TriggerType[] = ['donation', 'bits', 'raid', 'gift', 'sub']
 
 const newRule = (): Rule => ({
   id: crypto.randomUUID(), name: '', enabled: true, types: ['donation'], platforms: [],
-  filter: { minAmount: 0, maxAmount: 0, textContains: '', users: '', tests: 'any' }, cooldownSec: 0, cooldownPerUser: false, stop: false, actions: []
+  filter: { minAmount: 0, maxAmount: 0, textContains: '', users: '', tests: 'any' }, cooldownSec: 0, cooldownPerUser: false, stop: false, actions: [],
+  intervalMin: 15, onlyLive: true, hotkey: ''
 })
+
+/** Как подписать повод в строке правила: у таймера — интервал, у горячей клавиши — сочетание. */
+function triggerLabel(r: Rule, t: TriggerType): string {
+  if (t === 'timer') return `Каждые ${r.intervalMin} мин${r.onlyLive ? ' в эфире' : ''}`
+  if (t === 'hotkey') return r.hotkey ? `Клавиша ${r.hotkey}` : 'Клавиша не задана'
+  return TRIGGERS.find((y) => y.id === t)?.label ?? t
+}
+
+/** Сочетание из нажатия: Ctrl/Alt/Shift + буква, цифра, F1–F24, цифра доп. клавиатуры (формат Electron). */
+function accelFrom(e: KeyboardEvent): string | null {
+  const c = e.code
+  let key: string | null = null
+  if (/^Key[A-Z]$/.test(c)) key = c.slice(3)
+  else if (/^Digit[0-9]$/.test(c)) key = c.slice(5)
+  else if (/^Numpad[0-9]$/.test(c)) key = 'num' + c.slice(6)
+  else if (/^F([1-9]|1\d|2[0-4])$/.test(c)) key = c
+  if (!key) return null
+  const mods = [e.ctrlKey && 'Ctrl', e.altKey && 'Alt', e.shiftKey && 'Shift'].filter(Boolean) as string[]
+  if (!mods.length && !key.startsWith('F')) return null
+  return [...mods, key].join('+')
+}
+
+/** Поле записи горячей клавиши: нажмите сочетание — оно запишется. */
+function HotkeyInput({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const [rec, setRec] = useState(false)
+  const [hint, setHint] = useState('')
+  return (
+    <span className="hotkey">
+      <button type="button" className={`input mono hotkey-box ${rec ? 'rec' : ''}`}
+        onFocus={() => { setRec(true); setHint('') }} onBlur={() => setRec(false)}
+        onKeyDown={(e) => {
+          if (e.key === 'Tab') return
+          e.preventDefault()
+          if (e.key === 'Escape') { (e.target as HTMLElement).blur(); return }
+          if (['Control', 'Alt', 'Shift', 'Meta'].includes(e.key)) return
+          const a = accelFrom(e)
+          if (a) { onChange(a); setHint(''); (e.target as HTMLElement).blur() } else setHint('Нужен Ctrl, Alt или Shift + буква или цифра (или F1–F24)')
+        }}>
+        {rec ? 'Нажмите сочетание…' : value || 'Нажмите, чтобы задать'}
+      </button>
+      {value && !rec && <button type="button" className="btn sm" title="Убрать сочетание" onClick={() => onChange('')}>✕</button>}
+      {hint && <span className="small muted">{hint}</span>}
+    </span>
+  )
+}
 
 function newAction(type: RuleAction['type'], snap: HubSnapshot): RuleAction {
   if (type === 'alert') return { type, templateId: snap.templates[0]?.id ?? '' }
@@ -53,7 +102,7 @@ function actionPill(a: RuleAction, snap: HubSnapshot): { ico: string; text: stri
 /** Человеческое название, если пользователь его не задал. */
 function autoName(r: Rule): string {
   const t = r.types.map((x) => TRIGGERS.find((y) => y.id === x)?.label).filter(Boolean).join(' / ') || 'Правило'
-  return r.filter.minAmount ? `${t} от ${num(r.filter.minAmount)}${unit(r)}` : t
+  return r.filter.minAmount && r.types.some((x) => !isService(x)) ? `${t} от ${num(r.filter.minAmount)}${unit(r)}` : t
 }
 
 export function OverlayWarning({ snap }: { snap: HubSnapshot }) {
@@ -125,6 +174,7 @@ export function Rules({ snap }: { snap: HubSnapshot }) {
 function RuleRow({ r, snap, first, last, wrap, onEdit }: { r: Rule; snap: HubSnapshot; first: boolean; last: boolean; wrap: (p: Promise<unknown>) => void; onEdit: () => void }) {
   const f = r.filter
   const conds: string[] = []
+  const keyErr = snap.rules.hotkeyErrors[r.id]
   if (f.minAmount && f.maxAmount) conds.push(`${num(f.minAmount)}–${num(f.maxAmount)}${unit(r)}`)
   else if (f.minAmount) conds.push(`от ${num(f.minAmount)}${unit(r)}`)
   else if (f.maxAmount) conds.push(`до ${num(f.maxAmount)}${unit(r)}`)
@@ -142,11 +192,12 @@ function RuleRow({ r, snap, first, last, wrap, onEdit }: { r: Rule; snap: HubSna
         <div className="rule-name">{r.name}</div>
         <div className="rule-flow">
           <span className="lbl">Когда</span>
-          {r.types.length ? r.types.map((t) => { const x = TRIGGERS.find((y) => y.id === t)!; return <span key={t} className="pill"><i>{x.ico}</i>{x.label}</span> }) : <span className="pill dim">ничего не выбрано</span>}
+          {r.types.length ? r.types.map((t) => { const x = TRIGGERS.find((y) => y.id === t)!; return <span key={t} className="pill"><i>{x.ico}</i>{triggerLabel(r, t)}</span> }) : <span className="pill dim">ничего не выбрано</span>}
           {conds.map((c) => <span key={c} className="pill dim">{c}</span>)}
           <span className="arrow">→</span>
           {r.actions.length ? r.actions.map((a, i) => { const p = actionPill(a, snap); return <span key={i} className={`pill act a-${a.type}`}><i>{p.ico}</i>{p.text}</span> }) : <span className="pill dim">нет действий</span>}
         </div>
+        {keyErr && r.enabled && <div className="rule-meta warn">Горячая клавиша не работает: {keyErr}</div>}
         {(r.cooldownSec > 0 || r.stop) && <div className="rule-meta">{r.cooldownSec > 0 && `кулдаун ${r.cooldownSec} с${r.cooldownPerUser ? ' на зрителя' : ''}`}{r.cooldownSec > 0 && r.stop && ' · '}{r.stop && 'правила ниже не проверяются'}</div>}
       </div>
       <div className="rule-tools">
@@ -189,6 +240,8 @@ function RuleEditor({ rule, snap, onClose }: { rule: Rule; snap: HubSnapshot; on
   const setF = (p: Partial<Rule['filter']>): void => setR({ ...r, filter: { ...r.filter, ...p } })
   const setA = (i: number, a: RuleAction): void => setR({ ...r, actions: r.actions.map((x, j) => (j === i ? a : x)) })
   const hasAmount = r.types.some((t) => AMOUNT_TYPES.includes(t))
+  const hasViewer = r.types.some((t) => !isService(t))
+  const keyErr = exists && dirty === false ? snap.rules.hotkeyErrors[r.id] : undefined
   const toggleType = (t: TriggerType): void => set({ types: r.types.includes(t) ? r.types.filter((x) => x !== t) : [...r.types, t] })
   const togglePlat = (p: Platform): void => set({ platforms: r.platforms.includes(p) ? r.platforms.filter((x) => x !== p) : [...r.platforms, p] })
 
@@ -206,17 +259,36 @@ function RuleEditor({ rule, snap, onClose }: { rule: Rule; snap: HubSnapshot; on
 
       <Step n={1} title="Когда это происходит">
         <div className="chips big">
-          {TRIGGERS.map((x) => <button key={x.id} className={r.types.includes(x.id) ? 'on' : ''} onClick={() => toggleType(x.id)}><i>{x.ico}</i>{x.label}</button>)}
+          {TRIGGERS.filter((x) => !x.service).map((x) => <button key={x.id} className={r.types.includes(x.id) ? 'on' : ''} onClick={() => toggleType(x.id)}><i>{x.ico}</i>{x.label}</button>)}
         </div>
-        {!showPlat
+        <div className="chips-label">Эфир и управление</div>
+        <div className="chips big">
+          {TRIGGERS.filter((x) => x.service).map((x) => <button key={x.id} className={r.types.includes(x.id) ? 'on' : ''} onClick={() => toggleType(x.id)}><i>{x.ico}</i>{x.label}</button>)}
+        </div>
+        {r.types.includes('timer') && (
+          <div className="inline-cond">
+            <span>Каждые</span><NumIn width={90} min={1} max={720} value={r.intervalMin} onChange={(n) => set({ intervalMin: n })} /><span>мин</span>
+            <Toggle on={r.onlyLive} onChange={(v) => set({ onlyLive: v })} label="Только во время эфира" />
+          </div>
+        )}
+        {r.types.includes('hotkey') && (
+          <div className="inline-cond">
+            <span>Сочетание</span><HotkeyInput value={r.hotkey} onChange={(v) => set({ hotkey: v })} />
+            {keyErr && <span className="tag warn">{keyErr}</span>}
+          </div>
+        )}
+        {(r.types.includes('stream_start') || r.types.includes('stream_end')) && (
+          <p className="small muted" style={{ margin: '0 0 10px' }}>Начало и конец эфира Crossember узнаёт от OBS — он должен быть подключён (раздел «Подключения»).</p>
+        )}
+        {hasViewer && (!showPlat
           ? <button className="linkbtn" onClick={() => setShowPlat(true)}>Со всех площадок · выбрать конкретные</button>
           : <div className="chips">
               <button className={r.platforms.length === 0 ? 'on' : ''} onClick={() => set({ platforms: [] })}>Все площадки</button>
               {PLATFORMS.map((p) => <button key={p.id} className={r.platforms.includes(p.id) ? 'on' : ''} onClick={() => togglePlat(p.id)}>{p.label}</button>)}
-            </div>}
+            </div>)}
       </Step>
 
-      <Step n={2} title="Если" hint="ruleFilter" aside={!hasAmount && !showText && !showUsers ? 'необязательно' : undefined}>
+      {hasViewer && <Step n={2} title="Если" hint="ruleFilter" aside={!hasAmount && !showText && !showUsers ? 'необязательно' : undefined}>
         {hasAmount && (
           <div className="inline-cond">
             <span>Сумма от</span><NumIn width={120} value={r.filter.minAmount} onChange={(n) => setF({ minAmount: n })} />
@@ -242,9 +314,10 @@ function RuleEditor({ rule, snap, onClose }: { rule: Rule; snap: HubSnapshot; on
           {!showText && <button className="linkbtn" onClick={() => setShowText(true)}>+ слово в тексте</button>}
           {!showUsers && <button className="linkbtn" onClick={() => setShowUsers(true)}>+ только определённые ники</button>}
         </div>
-      </Step>
+        {r.types.some(isService) && <p className="small muted" style={{ margin: '4px 0 0' }}>Условия относятся только к событиям зрителей; эфир, таймер и клавиша срабатывают без них.</p>}
+      </Step>}
 
-      <Step n={3} title="Тогда">
+      <Step n={hasViewer ? 3 : 2} title="Тогда">
         {r.actions.map((a, i) => {
           const meta = ACTIONS.find((x) => x.type === a.type)!
           return (

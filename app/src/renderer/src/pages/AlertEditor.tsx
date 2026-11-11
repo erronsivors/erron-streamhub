@@ -33,7 +33,7 @@ const SAMPLE: Record<string, { user: string; amount: string; message: string; pl
 
 const uid = (): string => crypto.randomUUID()
 
-function makeLayer(type: LayerType): Layer {
+export function makeLayer(type: LayerType, patch: Partial<Layer> = {}): Layer {
   const card = type === 'card'
   const visual = VISUAL.includes(type)
   return {
@@ -43,7 +43,8 @@ function makeLayer(type: LayerType): Layer {
     text: card ? '{user} — {amount}' : type === 'tts' ? '{user} — {amount}. {message}' : type === 'text' ? '{user}' : '',
     kicker: card ? 'Новый донат' : '', showMessage: true, font: type === 'text' ? 'unbounded' : 'manrope', size: 56, color: '#ffffff', accent: '',
     align: 'center', bold: true, shadow: true, stroke: 0, media: '', fit: 'contain', loop: false, sound: type === 'sound' ? 'coin' : 'none', volume: 80,
-    voice: '', rate: 0, obs: { op: 'source', scene: '', source: '', filter: '', mode: 'show', media: 'restart', text: '', revertSec: 0 }
+    voice: '', rate: 0, obs: { op: 'source', scene: '', source: '', filter: '', mode: 'show', media: 'restart', text: '', revertSec: 0 },
+    ...patch
   }
 }
 
@@ -67,7 +68,7 @@ function parts(tpl: string, s: (typeof SAMPLE)[string]): Part[] {
 }
 const fillText = (tpl: string, s: (typeof SAMPLE)[string]): string => parts(tpl, s).map((p) => p.v).join('')
 
-function previewItem(t: AlertTemplate, kind: string, volume: number): unknown {
+export function previewItem(t: AlertTemplate, kind: string, volume: number): unknown {
   const s = SAMPLE[kind] ?? SAMPLE.donation
   const extra = t.extendByMessage && s.message ? Math.min(s.message.length * 40, 5000) : 0
   return {

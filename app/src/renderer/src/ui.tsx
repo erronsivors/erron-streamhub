@@ -67,14 +67,15 @@ const TYPE_ICO: Record<HubEvent['type'], string> = {
 
 export function EventRow({ e, now, onReplay }: { e: HubEvent; now: number; onReplay?: () => void }) {
   const amount = e.type === 'donation' && e.amount ? ` · ${e.amount.toLocaleString('ru-RU')} ${e.currency === 'RUB' ? '₽' : e.currency ?? ''}` : ''
+  const manual = e.manual || (e.platform === 'hub' && e.type === 'donation')
   return (
     <div className="row">
       <span className="ico" style={{ color: 'var(--light)' }}>{TYPE_ICO[e.type]}</span>
       <div className="grow">
         <b className="ellipsis">
-          {e.user} · {TYPE_LABEL[e.type]}{amount} {e.test && <span className="tag test">ТЕСТ</span>}
+          {e.user} · {TYPE_LABEL[e.type]}{amount} {e.test && <span className="tag test">ТЕСТ</span>}{manual && <span className="tag manual">ВРУЧНУЮ</span>}
         </b>
-        <span className="small muted ellipsis" style={{ display: 'block' }}>{e.text || PLATFORM_NAME[e.platform] || e.platform}</span>
+        <span className="small muted ellipsis" style={{ display: 'block' }}>{e.text || (manual ? 'Добавлен вручную' : PLATFORM_NAME[e.platform] || e.platform)}</span>
       </div>
       <span className="small muted">{fmtAgo(e.ts, now)}</span>
       {onReplay && <button className="btn sm" style={{ marginLeft: 8 }} title="Показать алерт ещё раз" onClick={onReplay}>↻</button>}

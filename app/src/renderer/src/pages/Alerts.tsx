@@ -5,7 +5,8 @@ import type { StatsSnapshot } from '../../../main/core/stats'
 import type { AlertTemplate } from '../../../main/core/templates'
 import { Hint, NumberField, Toggle, errText } from '../components'
 import { PlatIcon } from '../ui'
-import { AlertEditor, blankTemplate } from './AlertEditor'
+import { AlertEditor } from './AlertEditor'
+import { PresetPicker } from './AlertPresets'
 import { OverlayWarning } from './Rules'
 
 const TESTS: { kind: Parameters<typeof window.hub.testEvent>[0]; label: string }[] = [
@@ -97,11 +98,12 @@ export function Alerts({ snap }: { snap: HubSnapshot }) {
 function TemplatesCard({ snap, onEdit }: { snap: HubSnapshot; onEdit: (t: AlertTemplate) => void }) {
   const [err, setErr] = useState<string | null>(null)
   const [del, setDel] = useState<string | null>(null)
+  const [picking, setPicking] = useState(false)
   const wrap = (p: Promise<unknown>): void => { setErr(null); p.catch((e) => setErr(errText(e))) }
   const usedBy = (id: string): string[] => snap.rules.rules.filter((r) => r.actions.some((a) => a.type === 'alert' && a.templateId === id)).map((r) => r.name)
   return (
     <div className="card">
-      <h3>Шаблоны алертов <Hint id="alertTemplate" /><button className="btn sm primary r" onClick={() => onEdit(blankTemplate())}>+ Новый</button></h3>
+      <h3>Шаблоны алертов <Hint id="alertTemplate" /><button className="btn sm primary r" onClick={() => setPicking(true)}>+ Новый</button></h3>
       <p className="small muted" style={{ marginTop: -6 }}>Как выглядит алерт: слои на холсте и таймлайне. Когда какой показывать — решают <b>Правила</b>.</p>
       <div className="list">{snap.templates.map((t) => {
         const used = usedBy(t.id)
@@ -126,6 +128,7 @@ function TemplatesCard({ snap, onEdit }: { snap: HubSnapshot; onEdit: (t: AlertT
       })}</div>
       {!snap.templates.length && <p className="small muted">Шаблонов нет — создайте первый.</p>}
       {err && <p className="small" style={{ color: '#ff7a84' }}>{err}</p>}
+      {picking && <PresetPicker snap={snap} onClose={() => setPicking(false)} onPick={(t) => { setPicking(false); onEdit(t) }} />}
     </div>
   )
 }
@@ -174,7 +177,7 @@ function StatsCard({ snap }: { snap: HubSnapshot }) {
         </div>
         {st.byPlatform.length > 0 && <div className="list" style={{ marginTop: 10 }}>
           {st.byPlatform.map((p) => (
-            <div key={p.platform} className="row"><PlatIcon p={p.platform} /><div className="grow">{snap.connections.find((c) => c.id === p.platform)?.name ?? p.platform}</div><span className="small muted">{p.count} шт.</span><b style={{ marginLeft: 10 }}>{rub(p.rub)}</b></div>
+            <div key={p.platform} className="row"><PlatIcon p={p.platform} /><div className="grow">{p.platform === 'hub' ? 'Вручную' : snap.connections.find((c) => c.id === p.platform)?.name ?? p.platform}</div><span className="small muted">{p.count} шт.</span><b style={{ marginLeft: 10 }}>{rub(p.rub)}</b></div>
           ))}
         </div>}
         <h3 style={{ marginTop: 16 }}>Топ донатеров</h3>
