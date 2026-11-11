@@ -7,6 +7,10 @@ import type { SoundInfo } from './sounds'
 import type { MediaInfo } from './media'
 import type { AlertTemplate } from './templates'
 import type { RulesState } from './rules'
+import type { Counter } from './counters'
+import type { ProfileState } from './profile'
+import type { StreamInfoState } from './streaminfo'
+import type { KickAuthState } from './kickauth'
 
 export type Platform = 'twitch' | 'youtube' | 'vk' | 'kick' | 'goodgame' | 'donationalerts' | 'donatepay' | 'donatex' | 'boosty' | 'obs' | 'hub'
 
@@ -40,6 +44,8 @@ export interface HubEvent {
   test?: boolean
   /** Донат, добавленный вручную (наличные, перевод). В базе такие события — с площадкой hub. */
   manual?: boolean
+  /** Значения счётчиков на момент срабатывания правила (для подстановки {ключ}); в базу не пишется. */
+  vars?: Record<string, string>
 }
 
 export type ConnState = 'off' | 'connecting' | 'ok' | 'error'
@@ -130,6 +136,10 @@ export interface HubSnapshot {
   media: MediaInfo[]
   templates: AlertTemplate[]
   rules: RulesState
+  counters: Counter[]
+  profile: ProfileState
+  streamInfo: StreamInfoState
+  kickAuth: KickAuthState
   /** Сколько копий оверлея «Алерты» сейчас открыто (0 — алерты и озвучку некому показать). */
   alertOverlays: number
   float: { open: boolean; editing: boolean; hotkey: string }

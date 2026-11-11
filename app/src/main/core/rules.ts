@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto'
 import type { Hub } from './hub'
 import type { Store } from './db'
 import type { HubEvent, HubEventType, Platform } from './types'
+import { COUNTER_OPS, type CounterOp, type Counters } from './counters'
 import { ALERT_KINDS, type AlertKind, type AlertRule, type Settings } from './settings'
 import {
   bool, id, num, obj, oneOf, str, soundId, sanitizeObs, newLayer, simpleTemplate,
@@ -50,6 +51,7 @@ export type RuleAction =
   | { type: 'tts'; text: string; voice: string; rate: number; volume: number; when: TtsWhen; delaySec: number }
   | { type: 'sound'; sound: string; volume: number }
   | { type: 'obs'; obs: ObsAction }
+  | { type: 'counter'; counterId: string; op: CounterOp; value: number }
 
 export interface Rule {
   id: string
@@ -103,6 +105,8 @@ export interface RulePlan {
   /** Озвучка «после алерта»: отдельным элементом очереди следом за алертами события. */
   after: Layer[]
   obs: ObsAction[]
+  /** Изменения счётчиков: применяются до алертов, чтобы в тексте было уже новое значение. */
+  counters: { counterId: string; op: CounterOp; value: number }[]
 }
 
 /** Исполнители действий (алерты, OBS) — подключаются в index.ts. */
@@ -125,6 +129,7 @@ function sanitizeAction(v: unknown): RuleAction | null {
     }
     case 'sound': return { type: 'sound', sound: soundId(o.sound, 'coin'), volume: num(o.volume, 80, 0, 100) }
     case 'obs': return { type: 'obs', obs: sanitizeObs(o.obs) }
+    case 'counter': return { type: 'counter', counterId: id(o.counterId), op: oneOf(o.op, COUNTER_OPS, 'add'), value: num(o.value, 1, 0, 1_000_000_000) }
     default: return null
   }
 }
@@ -235,7 +240,7 @@ export class RuleEngine extends EventEmitter {
   private wasLive = false
   private hotkeyErrors: Record<string, string> = {}
 
-  constructor(private hub: Hub, private store: Store, private settings: Settings, private templates: TemplateStore, private runner: RuleRunner) {
+  constructor(private hub: Hub, private store: Store, private settings: Settings, private templates: TemplateStore, private runner: RuleRunner, private counters: Counters) {
     super()
     if (!templates.initialized()) {
       const m = migrateLegacy(settings.get().alerts.rules)
@@ -328,6 +333,18 @@ export class RuleEngine extends EventEmitter {
     return r
   }
 
+  /** Заменить все правила (загрузка профиля). */
+  replaceAll(list: Rule[], flags?: unknown): void {
+    this.rules = list.slice(0, 200)
+    this.nextAt.clear()
+    this.lastFire.clear()
+    const f = obj(flags)
+    this.enabled = bool(f.enabled, this.enabled)
+    this.dryRun = bool(f.dryRun, this.dryRun)
+    this.store.set('rules.flags', { enabled: this.enabled, dryRun: this.dryRun })
+    this.save()
+  }
+
   remove(ruleId: string): void {
     this.rules = this.rules.filter((r) => r.id !== ruleId)
     this.save()
@@ -357,6 +374,16 @@ export class RuleEngine extends EventEmitter {
     if (changed) this.save()
   }
 
+  /** Счётчик удалён — убрать действия с ним. */
+  forgetCounter(counterId: string): void {
+    let changed = false
+    for (const r of this.rules) {
+      const n = r.actions.filter((a) => !(a.type === 'counter' && a.counterId === counterId))
+      if (n.length !== r.actions.length) { r.actions = n; changed = true }
+    }
+    if (changed) this.save()
+  }
+
   private addLog(r: Rule, e: HubEvent, result: RuleLogEntry['result'], detail: string, type: RuleLogEntry['type'] = e.type): void {
     this.log.unshift({ ts: Date.now(), ruleId: r.id, ruleName: r.name, user: e.user, platform: e.platform, type, result, detail })
     if (this.log.length > LOG_LIMIT) this.log.length = LOG_LIMIT
@@ -367,6 +394,11 @@ export class RuleEngine extends EventEmitter {
       if (a.type === 'alert') return `алерт «${this.templates.get(a.templateId)?.name ?? 'шаблон удалён'}»`
       if (a.type === 'tts') return 'озвучка'
       if (a.type === 'sound') return 'звук'
+      if (a.type === 'counter') {
+        const c = this.counters.get(a.counterId)
+        const how = a.op === 'add' ? `+${a.value}` : a.op === 'sub' ? `−${a.value}` : a.op === 'set' ? `= ${a.value}` : '+ сумма'
+        return `счётчик «${c?.name ?? 'удалён'}» ${how}`
+      }
       return `OBS: ${a.obs.op}`
     }).join(', ') || 'нет действий'
   }
@@ -384,11 +416,34 @@ export class RuleEngine extends EventEmitter {
         else plan.extras.push(l)
       } else if (a.type === 'sound') {
         plan.extras.push(newLayer('sound', { sound: a.sound, volume: a.volume }))
+      } else if (a.type === 'counter') {
+        plan.counters.push({ counterId: a.counterId, op: a.op, value: a.value })
       } else plan.obs.push(a.obs)
     }
   }
 
-  private execute(plan: RulePlan, e: HubEvent, force: boolean): void {
+  /**
+   * Счётчики → снимок значений для подстановки. Настоящее событие меняет счётчики;
+   * проверка правила (кнопка «Тест») только показывает, что было бы, и ничего не меняет.
+   */
+  private applyCounters(plan: RulePlan, e: HubEvent, commit: boolean): Record<string, string> {
+    const amount = eventValue(e)
+    if (commit) {
+      for (const c of plan.counters) this.counters.apply(c.counterId, c.op, c.value, amount)
+      return this.counters.vars()
+    }
+    const copy = new Map(this.counters.list().map((c) => [c.id, { ...c }]))
+    for (const c of plan.counters) {
+      const x = copy.get(c.counterId)
+      if (x) x.value = Math.round(c.op === 'add' ? x.value + c.value : c.op === 'sub' ? x.value - c.value : c.op === 'set' ? c.value : x.value + amount)
+    }
+    const out: Record<string, string> = {}
+    for (const x of copy.values()) out[x.key] = String(x.value)
+    return out
+  }
+
+  private execute(plan: RulePlan, ev: HubEvent, force: boolean): void {
+    const e: HubEvent = { ...ev, vars: this.applyCounters(plan, ev, !force) }
     if (plan.templates.length || plan.extras.length || plan.afterIn.length || plan.after.length) this.runner.play(plan, e, force)
     for (const o of plan.obs) {
       this.runner.obs(o, e).catch((err) => this.hub.log('obs', 'warn', `Правило не выполнило действие OBS: ${(err as Error).message}`))
@@ -458,4 +513,4 @@ export class RuleEngine extends EventEmitter {
 
 export const newRuleId = (): string => randomUUID()
 
-const emptyPlan = (): RulePlan => ({ templates: [], extras: [], afterIn: [], after: [], obs: [] })
+const emptyPlan = (): RulePlan => ({ templates: [], extras: [], afterIn: [], after: [], obs: [], counters: [] })

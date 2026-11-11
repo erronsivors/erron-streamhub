@@ -7,3 +7,5 @@ data/
 
 # Общий OAuth-клиент Google — только локально (GitHub/Google отзывают такие ключи в публичных репо)
 resources/youtube/oauth-client.json
+# Общий OAuth-клиент Kick — тоже только локально
+resources/kick/oauth-client.json

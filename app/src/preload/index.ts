@@ -6,6 +6,8 @@ import type { AppSettings } from '../main/core/settings'
 import type { MediaInfo } from '../main/core/media'
 import type { AlertTemplate, ObsAction } from '../main/core/templates'
 import type { Rule } from '../main/core/rules'
+import type { Counter } from '../main/core/counters'
+import type { ProfilePart, ProfileSummary } from '../main/core/profile'
 import type { ObsCatalog } from '../main/core/obs'
 import type { TtsVoice } from '../main/core/tts'
 
@@ -38,6 +40,22 @@ const api = {
   ruleTest: (id: string, kind: string) => call<boolean>('hub:ruleTest', id, kind),
   rulesFlags: (p: { enabled?: boolean; dryRun?: boolean }) => call('hub:rulesFlags', p),
   rulesClearLog: () => call('hub:rulesClearLog'),
+  infoDraft: (v: { title?: string; game?: string; ytCategory?: string; targets?: string[] }) => call('hub:infoDraft', v),
+  infoApply: () => call('hub:infoApply'),
+  infoSuggest: (q: string) => call<string[]>('hub:infoSuggest', q),
+  infoFromTwitch: () => call('hub:infoFromTwitch'),
+  infoOpen: (p: string) => call('hub:infoOpen', p),
+  kickLogin: () => call('hub:kickLogin'),
+  kickCancel: () => call('hub:kickCancel'),
+  kickLogout: () => call('hub:kickLogout'),
+  profileExport: (withMedia: boolean) => call<{ size: number } | null>('hub:profileExport', withMedia),
+  profilePick: () => call<ProfileSummary | null>('hub:profilePick'),
+  profileApply: (parts: ProfilePart[]) => call('hub:profileApply', parts),
+  profileCancel: () => call('hub:profileCancel'),
+  profileUndo: () => call('hub:profileUndo'),
+  counterPut: (c: Partial<Counter> & { name: string }) => call<Counter>('hub:counterPut', c),
+  counterRemove: (id: string) => call('hub:counterRemove', id),
+  counterApply: (id: string, op: 'add' | 'sub' | 'set', n: number) => call<Counter | null>('hub:counterApply', id, op, n),
   templatePut: (t: AlertTemplate) => call<AlertTemplate>('hub:templatePut', t),
   templateRemove: (id: string) => call('hub:templateRemove', id),
   templateDuplicate: (id: string) => call<AlertTemplate | null>('hub:templateDuplicate', id),

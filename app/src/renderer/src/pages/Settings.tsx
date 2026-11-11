@@ -4,6 +4,7 @@ import { Hint, NumberField, ThemePicker, Toggle } from '../components'
 import type { FloatChatSettings, TtsSettings } from '../../../main/core/settings'
 import { VoiceSelect, previewTts } from '../editors'
 import { errText } from '../components'
+import type { ProfilePart, ProfileSummary } from '../../../main/core/profile'
 
 export function Settings({ snap }: { snap: HubSnapshot }) {
   const s = snap.settings
@@ -16,7 +17,7 @@ export function Settings({ snap }: { snap: HubSnapshot }) {
       <div className="head">
         <div>
           <h1>Настройки</h1>
-          <p>Режим работы, тема, второй ПК, ключи доступа.</p>
+          <p>Режим работы, тема, второй ПК, ключи доступа, профиль.</p>
         </div>
       </div>
       <div className="grid g2">
@@ -41,6 +42,7 @@ export function Settings({ snap }: { snap: HubSnapshot }) {
 
         <FloatCard snap={snap} />
         <TtsCard snap={snap} />
+        <ProfileCard snap={snap} />
 
         {(
           <div className="card">
@@ -93,6 +95,83 @@ export function Settings({ snap }: { snap: HubSnapshot }) {
         </div>
       </div>
     </>
+  )
+}
+
+const PARTS: { id: ProfilePart; label: string; count: (s: ProfileSummary) => string }[] = [
+  { id: 'settings', label: 'Настройки', count: (s) => (s.settings ? 'оверлеи, озвучка, площадки, тема' : 'нет в файле') },
+  { id: 'rules', label: 'Правила и счётчики', count: (s) => `${s.rules} правил, ${s.counters} счётчиков` },
+  { id: 'templates', label: 'Шаблоны алертов', count: (s) => `${s.templates} шт.` },
+  { id: 'media', label: 'Картинки, видео и звуки', count: (s) => `${s.media + s.sounds} файлов` }
+]
+const has = (s: ProfileSummary, p: ProfilePart): boolean =>
+  p === 'settings' ? s.settings : p === 'rules' ? s.rules + s.counters > 0 : p === 'templates' ? s.templates > 0 : s.media + s.sounds > 0
+const mb = (n: number): string => (n < 1024 * 1024 ? `${Math.max(1, Math.round(n / 1024))} КБ` : `${(n / 1024 / 1024).toFixed(1).replace('.', ',')} МБ`)
+const when = (ts: number): string => new Date(ts).toLocaleString('ru-RU', { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' })
+
+/** Профиль: сохранить всё в один файл и загрузить обратно (на этом или другом ПК). */
+function ProfileCard({ snap }: { snap: HubSnapshot }) {
+  const [withMedia, setWithMedia] = useState(true)
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null)
+  const [pick, setPick] = useState<ProfileSummary | null>(null)
+  const [parts, setParts] = useState<ProfilePart[]>([])
+  const [confirmUndo, setConfirmUndo] = useState(false)
+  const run = (p: Promise<unknown>, ok?: (v: unknown) => void): void => {
+    setBusy(true); setMsg(null)
+    p.then((v) => ok?.(v)).catch((e) => setMsg({ ok: false, text: errText(e) })).finally(() => setBusy(false))
+  }
+  const last = snap.profile.lastBackup
+
+  return (
+    <div className="card">
+      <h3>Профиль <Hint id="profile" /></h3>
+      <p className="small muted" style={{ marginTop: -6 }}>Все настройки, правила, счётчики, шаблоны алертов и свои файлы — в одном файле. Для переезда на другой ПК или на всякий случай. Токенов и паролей в файле нет.</p>
+      {!pick ? (
+        <>
+          <Toggle on={withMedia} onChange={setWithMedia} label="Вместе с картинками, видео и звуками" />
+          <div className="btnrow" style={{ marginTop: 10 }}>
+            <button className="btn sm primary" disabled={busy} onClick={() => run(window.hub.profileExport(withMedia), (r) => r && setMsg({ ok: true, text: `Профиль сохранён (${mb((r as { size: number }).size)}).` }))}>Сохранить в файл…</button>
+            <button className="btn sm" disabled={busy} onClick={() => run(window.hub.profilePick(), (r) => {
+              if (!r) return
+              const s = r as ProfileSummary
+              setPick(s)
+              setParts(PARTS.filter((p) => has(s, p.id)).map((p) => p.id))
+            })}>Загрузить из файла…</button>
+          </div>
+        </>
+      ) : (
+        <div className="profile-pick">
+          <div className="small muted">Файл от {pick.createdAt ? when(pick.createdAt) : 'неизвестной даты'} · {mb(pick.size)}. Что загрузить:</div>
+          <div className="profile-parts">
+            {PARTS.map((p) => {
+              const avail = has(pick, p.id)
+              return (
+                <label key={p.id} className={`profile-part ${avail ? '' : 'off'}`}>
+                  <input type="checkbox" disabled={!avail} checked={avail && parts.includes(p.id)}
+                    onChange={(e) => setParts(e.target.checked ? [...parts, p.id] : parts.filter((x) => x !== p.id))} />
+                  <span><b>{p.label}</b><span className="small muted">{p.count(pick)}</span></span>
+                </label>
+              )
+            })}
+          </div>
+          <p className="small muted" style={{ margin: '8px 0 10px' }}>Выбранное заменит текущее. Перед этим Crossember сам сохранит резервную копию — вернуть можно одной кнопкой. Свои картинки и звуки только добавляются, ничего не удаляется.</p>
+          <div className="btnrow">
+            <button className="btn sm primary" disabled={busy || !parts.length} onClick={() => run(window.hub.profileApply(parts), () => { setPick(null); setMsg({ ok: true, text: 'Профиль загружен.' }) })}>Загрузить</button>
+            <button className="btn sm" disabled={busy} onClick={() => { void window.hub.profileCancel(); setPick(null) }}>Отмена</button>
+          </div>
+        </div>
+      )}
+      {msg && <div className={`note ${msg.ok ? '' : 'warnbox'}`} style={{ marginTop: 12 }}>{msg.text}</div>}
+      {last && !pick && (
+        <div className="profile-undo">
+          <span className="small muted">Резервная копия до загрузки профиля: {when(last)}</span>
+          {confirmUndo
+            ? <span className="btnrow"><button className="btn sm" disabled={busy} onClick={() => { setConfirmUndo(false); run(window.hub.profileUndo(), () => setMsg({ ok: true, text: 'Вернули как было до загрузки профиля.' })) }}>Да, вернуть</button><button className="btn sm" onClick={() => setConfirmUndo(false)}>Нет</button></span>
+            : <button className="btn sm" disabled={busy} onClick={() => setConfirmUndo(true)}>Вернуть как было</button>}
+        </div>
+      )}
+    </div>
   )
 }
 

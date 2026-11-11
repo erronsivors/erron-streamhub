@@ -422,6 +422,52 @@ export class TwitchConnector implements ChatConnector {
     if (m.platform === 'twitch' && m.userId) await this.banUser(m.userId, seconds, 'Crossember')
   }
 
+  // ---------- название и категория эфира ----------
+
+  /** Можно ли менять название: вошёл стример и у входа есть право channel:manage:broadcast (появилось в этапе 5). */
+  infoAccess(): 'ok' | 'login' | 'relogin' {
+    if (!this.auth.account('broadcaster')) return 'login'
+    return this.auth.hasScope('broadcaster', 'channel:manage:broadcast') ? 'ok' : 'relogin'
+  }
+
+  /** Поиск категорий (игр) по названию. */
+  async searchCategories(q: string): Promise<{ id: string; name: string }[]> {
+    if (!this.auth.account('broadcaster') || !q.trim()) return []
+    const res = await this.helix(`/search/categories?first=8&query=${encodeURIComponent(q.trim().slice(0, 100))}`)
+    if (!res.ok) throw new Error(`Twitch API: ${res.status}`)
+    return ((await res.json()) as { data?: Json[] }).data?.map((c) => ({ id: s(c.id), name: s(c.name) })).filter((c) => /^\d{1,20}$/.test(c.id)) ?? []
+  }
+
+  /** Текущие название и категория канала. */
+  async channelInfo(): Promise<{ title: string; game: string }> {
+    const me = this.auth.account('broadcaster')
+    if (!me) throw new Error('Не выполнен вход в Twitch')
+    const res = await this.helix(`/channels?broadcaster_id=${encodeURIComponent(me.id)}`)
+    if (!res.ok) throw new Error(`Twitch API: ${res.status}`)
+    const c = ((await res.json()) as { data?: Json[] }).data?.[0] ?? {}
+    return { title: s(c.title), game: s(c.game_name) }
+  }
+
+  /** Сменить название и (если найдена) категорию. Возвращает, какая категория поставлена. */
+  async setChannelInfo(title: string, game: string): Promise<string> {
+    const me = this.auth.account('broadcaster')
+    if (!me) throw new Error('Не выполнен вход в Twitch')
+    if (this.infoAccess() === 'relogin') throw new Error('Нужно новое разрешение — войдите в Twitch заново (Подключения → Twitch)')
+    const body: Json = { title: title.slice(0, 140) }
+    let gameName = ''
+    if (game.trim()) {
+      const found = await this.searchCategories(game)
+      const pick = found.find((c) => c.name.toLowerCase() === game.trim().toLowerCase()) ?? found[0]
+      if (!pick) throw new Error(`Категория «${game}» на Twitch не найдена`)
+      body.game_id = pick.id
+      gameName = pick.name
+    }
+    const res = await this.helix(`/channels?broadcaster_id=${encodeURIComponent(me.id)}`, { method: 'PATCH', body: JSON.stringify(body) })
+    if (res.status === 401 || res.status === 403) throw new Error('Twitch не дал прав — войдите заново (Подключения → Twitch)')
+    if (!res.ok) throw new Error(`Twitch API: ${res.status}`)
+    return gameName
+  }
+
   async deleteById(messageId: string): Promise<void> {
     const me = this.auth.account('broadcaster')
     if (!me || !/^[\w-]{1,100}$/.test(messageId)) return

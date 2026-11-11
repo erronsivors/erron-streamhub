@@ -123,6 +123,8 @@ export interface AppSettings {
     pinned: { theme: Theme; fontSize: number }
     top: { theme: Theme; period: StatsPeriod; count: number; fontSize: number }
     last: { theme: Theme; fontSize: number; showSub: boolean }
+    /** Счётчики: какие показывать (пусто — все), в столбик или в строку. */
+    counter: { theme: Theme; fontSize: number; ids: string[]; layout: 'column' | 'row' }
   }
   float: FloatChatSettings
 }
@@ -179,7 +181,8 @@ export const DEFAULTS: AppSettings = {
     chatH: chatDefaults(true),
     pinned: { theme: 'general', fontSize: 34 },
     top: { theme: 'general', period: 'stream', count: 5, fontSize: 24 },
-    last: { theme: 'general', fontSize: 26, showSub: true }
+    last: { theme: 'general', fontSize: 26, showSub: true },
+    counter: { theme: 'general', fontSize: 30, ids: [], layout: 'column' }
   },
   float: { ...chatDefaults(false), fontSize: 18, maxMessages: 12, hideAfterSec: 45, showStatus: true, enabled: false, bgOpacity: 55, bounds: null }
 }
@@ -331,6 +334,12 @@ export function sanitize(input: unknown, base: AppSettings = DEFAULTS): AppSetti
         const o = obj(ov.last)
         const b = base.overlays.last ?? DEFAULTS.overlays.last
         return { theme: theme(o.theme, b.theme), fontSize: int(o.fontSize, b.fontSize, 12, 72), showSub: bool(o.showSub, b.showSub) }
+      })(),
+      counter: (() => {
+        const o = obj(ov.counter)
+        const b = base.overlays.counter ?? DEFAULTS.overlays.counter
+        const ids = Array.isArray(o.ids) ? o.ids.filter((x): x is string => typeof x === 'string' && /^[\w-]{1,40}$/.test(x)).slice(0, 50) : b.ids
+        return { theme: theme(o.theme, b.theme), fontSize: int(o.fontSize, b.fontSize, 12, 96), ids, layout: o.layout === 'row' || o.layout === 'column' ? o.layout : b.layout }
       })()
     },
     float: float(i.float, base.float ?? DEFAULTS.float)
@@ -357,6 +366,14 @@ export class Settings {
   }
 
   get(): AppSettings {
+    return this.value
+  }
+
+  /** Заменить настройки целиком (загрузка профиля); недостающее берётся из текущих. */
+  replaceAll(v: unknown): AppSettings {
+    this.value = sanitize(v, this.value)
+    this.store.set('settings', this.value)
+    this.onChange(this.value)
     return this.value
   }
 

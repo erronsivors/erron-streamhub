@@ -14,6 +14,7 @@ import type { Stats } from './stats'
 import type { SoundLibrary } from './sounds'
 import type { MediaLibrary } from './media'
 import type { WindowsTts } from './tts'
+import type { Counter, Counters } from './counters'
 
 /** Оверлеи для OBS. id = имя файла в resources/overlays, key = ключ настроек. */
 const OVERLAYS = [
@@ -23,6 +24,7 @@ const OVERLAYS = [
   { id: 'pinned', key: 'pinned', name: 'Закреплённое сообщение', size: '1200 × 300' },
   { id: 'top', key: 'top', name: 'Топ донатеров', size: '500 × 400' },
   { id: 'last', key: 'last', name: 'Последний донат', size: '800 × 140' },
+  { id: 'counter', key: 'counter', name: 'Счётчики', size: '600 × 300' },
   // Окно «чат поверх игры» — открывается самим Crossember, в списке для OBS не показывается.
   { id: 'float', key: 'float', name: 'Чат поверх игры', size: '', hidden: true }
 ] as { id: string; key: string; name: string; size: string; hidden?: boolean }[]
@@ -39,6 +41,7 @@ const ASSETS: Record<string, string> = {
   'remote.js': 'text/javascript; charset=utf-8',
   'top.js': 'text/javascript; charset=utf-8',
   'last.js': 'text/javascript; charset=utf-8',
+  'counter.js': 'text/javascript; charset=utf-8',
   'sounds.js': 'text/javascript; charset=utf-8'
 }
 
@@ -91,6 +94,7 @@ export interface OverlayExtras {
   sounds: SoundLibrary
   media: MediaLibrary
   tts: WindowsTts
+  counters: Counters
 }
 
 export interface RemoteActions {
@@ -143,6 +147,7 @@ export class OverlayServer {
     // Алерты идут только в оверлеи (local), пульту второго ПК они не нужны.
     extras.alerts.on('play', (a: AlertItem) => this.broadcast({ kind: 'alert', alert: a, at: Date.now() }, 'local'))
     extras.alerts.on('end', (id: string) => this.broadcast({ kind: 'alert-end', id }, 'local'))
+    extras.counters.on('change', (list: Counter[]) => this.broadcast({ kind: 'counters', counters: list }, 'local'))
     hub.on('event', (e: HubEvent) => {
       if (e.type !== 'message' && e.type !== 'system' && !e.test) this.pushStats()
     })
@@ -222,7 +227,7 @@ export class OverlayServer {
       chat: this.hub.recentChat().slice(0, 50),
       events: kind === 'lan' ? this.hub.recent().slice(0, 30) : [],
       pinned: this.hub.pinned,
-      ...(kind === 'local' ? { stats: this.statsData() } : {}),
+      ...(kind === 'local' ? { stats: this.statsData(), counters: this.extras.counters.list() } : {}),
       // Снимок для оверлея алертов после (пере)подключения: что идёт сейчас и с какого момента.
       ...(ov === 'alert' ? { alert: this.extras.alerts.nowPlaying() } : {})
     })

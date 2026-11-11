@@ -2,6 +2,7 @@ import { useState, type ReactNode, type KeyboardEvent } from 'react'
 import type { HubSnapshot, Platform } from '../../../main/core/types'
 import type { Rule, RuleAction, TriggerType, TtsWhen } from '../../../main/core/rules'
 import type { ObsAction } from '../../../main/core/templates'
+import type { Counter, CounterOp } from '../../../main/core/counters'
 import { Hint, Toggle, errText } from '../components'
 import { PlatIcon, fmtTime } from '../ui'
 import { ObsActionEditor, SoundSelect, VoiceSelect, previewSound, previewTts } from '../editors'
@@ -23,8 +24,14 @@ const ACTIONS: { type: RuleAction['type']; ico: string; title: string; desc: str
   { type: 'alert', ico: '✦', title: 'Показать алерт', desc: 'Шаблон из раздела «Алерты»' },
   { type: 'tts', ico: '🗣', title: 'Озвучить', desc: 'Прочитать ник, сумму и сообщение' },
   { type: 'sound', ico: '♪', title: 'Звук', desc: 'Встроенный или свой файл' },
-  { type: 'obs', ico: '◧', title: 'Действие в OBS', desc: 'Сцена, источник, фильтр, текст' }
+  { type: 'obs', ico: '◧', title: 'Действие в OBS', desc: 'Сцена, источник, фильтр, текст' },
+  { type: 'counter', ico: '#', title: 'Счётчик', desc: 'Прибавить, отнять, установить' }
 ]
+const COUNTER_OPS: { id: CounterOp; label: string }[] = [
+  { id: 'add', label: 'Прибавить' }, { id: 'sub', label: 'Отнять' }, { id: 'set', label: 'Сделать равным' }, { id: 'amount', label: 'Прибавить сумму' }
+]
+/** Ключ из названия — как в ядре (counters.ts keyFrom). */
+const keyFrom = (name: string): string => name.trim().toLowerCase().replace(/\s+/g, '_').replace(/[^a-zа-яё0-9_]/g, '').slice(0, 24)
 const TTS_WHEN: { id: TtsWhen; label: string; short: string; hint: string }[] = [
   { id: 'with', label: 'Вместе с алертом', short: '', hint: 'Голос начинает почти сразу, пока алерт появляется.' },
   { id: 'afterIn', label: 'Когда алерт появится', short: 'после появления', hint: 'Сначала проходит анимация появления, потом голос.' },
@@ -89,8 +96,9 @@ function newAction(type: RuleAction['type'], snap: HubSnapshot): RuleAction {
   if (type === 'alert') return { type, templateId: snap.templates[0]?.id ?? '' }
   if (type === 'tts') return { type, text: '{user} — {amount}. {message}', voice: '', rate: 0, volume: 100, when: 'with', delaySec: 2 }
   if (type === 'sound') return { type, sound: 'coin', volume: 80 }
+  if (type === 'counter') return { type, counterId: snap.counters[0]?.id ?? '', op: 'add', value: 1 }
   const obs: ObsAction = { op: 'source', scene: '', source: '', filter: '', mode: 'show', media: 'restart', text: '', revertSec: 10 }
-  return { type, obs }
+  return { type: 'obs', obs }
 }
 
 const unit = (r: Rule): string => r.types.length === 1 && r.types[0] === 'donation' ? ' ₽' : ''
@@ -103,6 +111,11 @@ function actionPill(a: RuleAction, snap: HubSnapshot): { ico: string; text: stri
     return { ico: '🗣', text: a.when === 'delay' ? `Озвучка через ${a.delaySec} с` : w?.short ? `Озвучка ${w.short}` : 'Озвучка' }
   }
   if (a.type === 'sound') return { ico: '♪', text: 'Звук' }
+  if (a.type === 'counter') {
+    const c = snap.counters.find((x) => x.id === a.counterId)
+    const how = a.op === 'add' ? `+${a.value}` : a.op === 'sub' ? `−${a.value}` : a.op === 'set' ? `= ${a.value}` : '+ сумма'
+    return { ico: '#', text: `${c?.name ?? 'Счётчик не выбран'} ${how}` }
+  }
   const o = a.obs
   const what = o.op === 'scene' ? `сцена «${o.scene || '?'}»` : o.op === 'filter' ? `фильтр «${o.filter || '?'}»` : o.op === 'text' ? `текст «${o.source || '?'}»` : `«${o.source || '?'}»`
   return { ico: '◧', text: `OBS: ${what}` }
@@ -160,6 +173,7 @@ export function Rules({ snap }: { snap: HubSnapshot }) {
         </div>
 
         <div className="grid" style={{ alignContent: 'start' }}>
+          <CountersCard snap={snap} />
           <div className="card">
             <h3>Журнал <button className="btn sm r" disabled={!st.log.length} onClick={() => wrap(window.hub.rulesClearLog())}>Очистить</button></h3>
             <Toggle on={st.dryRun} onChange={(v) => wrap(window.hub.rulesFlags({ dryRun: v }))} label={<>Проверять без выполнения <Hint id="dryRun" /></>} />
@@ -347,7 +361,7 @@ function RuleEditor({ rule, snap, onClose }: { rule: Rule; snap: HubSnapshot; on
               {a.type === 'tts' && (
                 <>
                   <div className="field" style={{ marginBottom: 8 }}>
-                    <label>Что читать — {'{user}'} ник, {'{amount}'} сумма, {'{message}'} сообщение</label>
+                    <label>Что читать — {'{user}'} ник, {'{amount}'} сумма, {'{message}'} сообщение{snap.counters.length ? <>, счётчики: {snap.counters.slice(0, 3).map((c) => `{${c.key}}`).join(' ')}</> : null}</label>
                     <input className="input" value={a.text} maxLength={300} onChange={(e) => setA(i, { ...a, text: e.target.value })} />
                   </div>
                   <div className="inline-cond">
@@ -363,7 +377,7 @@ function RuleEditor({ rule, snap, onClose }: { rule: Rule; snap: HubSnapshot; on
                     <div className="field"><label>Скорость</label><NumIn min={-10} max={10} value={a.rate} onChange={(n) => setA(i, { ...a, rate: n })} /></div>
                     <div className="field"><label>Громкость, %</label><NumIn max={100} value={a.volume} onChange={(n) => setA(i, { ...a, volume: n })} /></div>
                   </div>
-                  <button className="btn sm" onClick={() => previewTts(snap, a.text.replace('{user}', 'Тестовый зритель').replace('{amount}', '500 рублей').replace('{message}', 'Привет со стрима!')).catch((e) => setErr(errText(e)))}>▶ Послушать</button>
+                  <button className="btn sm" onClick={() => previewTts(snap, a.text.replace('{user}', 'Тестовый зритель').replace('{amount}', '500 рублей').replace('{message}', 'Привет со стрима!').replace(/\{([A-Za-zА-Яа-яЁё0-9_]{1,24})\}/g, (m, k: string) => String(snap.counters.find((c) => c.key === k)?.value ?? m))).catch((e) => setErr(errText(e)))}>▶ Послушать</button>
                 </>
               )}
               {a.type === 'sound' && (
@@ -374,6 +388,30 @@ function RuleEditor({ rule, snap, onClose }: { rule: Rule; snap: HubSnapshot; on
                 </div>
               )}
               {a.type === 'obs' && <ObsActionEditor value={a.obs} onChange={(o) => setA(i, { ...a, obs: o })} />}
+              {a.type === 'counter' && (snap.counters.length ? (
+                <>
+                  <div className="action-grid">
+                    <div className="field"><label>Счётчик</label>
+                      <select className="input" value={a.counterId} onChange={(e) => setA(i, { ...a, counterId: e.target.value })}>
+                        {!snap.counters.some((c) => c.id === a.counterId) && <option value={a.counterId}>— выберите —</option>}
+                        {snap.counters.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                      </select>
+                    </div>
+                    <div className="field"><label>Что сделать</label>
+                      <select className="input" value={a.op} onChange={(e) => setA(i, { ...a, op: e.target.value as CounterOp })}>
+                        {COUNTER_OPS.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
+                      </select>
+                    </div>
+                    <div className="field"><label>{a.op === 'set' ? 'Значение' : 'На сколько'}</label>
+                      {a.op === 'amount' ? <input className="input" disabled value="сумма события" /> : <NumIn max={1_000_000_000} value={a.value} onChange={(n) => setA(i, { ...a, value: n })} />}
+                    </div>
+                  </div>
+                  <p className="small muted" style={{ margin: '6px 0 0' }}>
+                    {a.op === 'amount' ? 'Донаты — в рублях, биты, рейды и подарки — их количество. ' : ''}
+                    Алерт и озвучка этого правила покажут уже новое значение. Кнопка «Тест» счётчик не меняет.
+                  </p>
+                </>
+              ) : <p className="small muted" style={{ margin: 0 }}>Счётчиков пока нет — добавьте в карточке «Счётчики» справа.</p>)}
             </div>
           )
         })}
@@ -419,6 +457,74 @@ function RuleEditor({ rule, snap, onClose }: { rule: Rule; snap: HubSnapshot; on
         {exists && (confirmDel
           ? <button className="btn" style={{ marginLeft: 'auto', borderColor: '#ff7a84', color: '#ff7a84' }} onClick={() => { void window.hub.ruleRemove(rule.id); onClose() }}>Точно удалить?</button>
           : <button className="btn" style={{ marginLeft: 'auto' }} onClick={() => setConfirmDel(true)}>Удалить</button>)}
+      </div>
+    </div>
+  )
+}
+
+/** Карточка «Счётчики»: значения с кнопками −/+, добавление и правка. */
+function CountersCard({ snap }: { snap: HubSnapshot }) {
+  const [edit, setEdit] = useState<Counter | null>(null)
+  const [err, setErr] = useState<string | null>(null)
+  const wrap = (p: Promise<unknown>, after?: () => void): void => { setErr(null); p.then(() => after?.()).catch((e) => setErr(errText(e))) }
+  const isNew = !!edit && !snap.counters.some((c) => c.id === edit.id)
+  const blank = (): Counter => ({ id: crypto.randomUUID(), name: '', key: '', value: 0 })
+
+  return (
+    <div className="card">
+      <h3>Счётчики <Hint id="counters" /> <button className="btn sm r" disabled={isNew} onClick={() => { setErr(null); setEdit(blank()) }}>+ Счётчик</button></h3>
+      <div className="list counters">
+        {snap.counters.map((c) => edit?.id === c.id
+          ? <CounterEdit key={c.id} c={edit} isNew={false} onChange={setEdit} onCancel={() => setEdit(null)} onSave={(x) => wrap(window.hub.counterPut(x), () => setEdit(null))} onRemove={() => wrap(window.hub.counterRemove(c.id), () => setEdit(null))} />
+          : (
+            <div key={c.id} className="row counter-row">
+              <div className="grow" onClick={() => { setErr(null); setEdit({ ...c }) }} title="Изменить">
+                <b className="ellipsis">{c.name}</b>
+                <code className="counter-key">{`{${c.key}}`}</code>
+              </div>
+              <div className="counter-ctl">
+                <button className="btn sm" title="Отнять 1" onClick={() => wrap(window.hub.counterApply(c.id, 'sub', 1))}>−</button>
+                <span className="counter-val">{c.value.toLocaleString('ru-RU')}</span>
+                <button className="btn sm" title="Прибавить 1" onClick={() => wrap(window.hub.counterApply(c.id, 'add', 1))}>+</button>
+              </div>
+            </div>
+          ))}
+        {isNew && edit && <CounterEdit c={edit} isNew onChange={setEdit} onCancel={() => setEdit(null)} onSave={(x) => wrap(window.hub.counterPut(x), () => setEdit(null))} />}
+      </div>
+      {!snap.counters.length && !edit && <p className="small muted">Счётчиков нет. Например: смерти, победы, «собрано на цель».</p>}
+      {err && <p className="small" style={{ color: '#ff7a84', margin: '8px 0 0' }}>{err}</p>}
+      <p className="small muted" style={{ margin: '10px 0 0' }}>В текстах алертов, озвучки и OBS пишите ключ в фигурных скобках. Менять счётчик по клавише — правило с поводом «Горячая клавиша» и действием «Счётчик». На экран — оверлей «Счётчики».</p>
+    </div>
+  )
+}
+
+function CounterEdit({ c, isNew, onChange, onSave, onCancel, onRemove }: {
+  c: Counter; isNew: boolean; onChange: (c: Counter) => void; onSave: (c: Counter) => void; onCancel: () => void; onRemove?: () => void
+}) {
+  const [keyTouched, setKeyTouched] = useState(!isNew)
+  const [confirmDel, setConfirmDel] = useState(false)
+  return (
+    <div className="counter-edit">
+      <div className="action-grid">
+        <div className="field"><label>Название</label>
+          <input className="input" autoFocus value={c.name} maxLength={40} placeholder="Смерти"
+            onChange={(e) => onChange({ ...c, name: e.target.value, key: keyTouched ? c.key : keyFrom(e.target.value) })} />
+        </div>
+        <div className="field"><label>Ключ для текстов</label>
+          <input className="input mono" value={c.key} maxLength={24} placeholder="смерти"
+            onChange={(e) => { setKeyTouched(true); onChange({ ...c, key: e.target.value.replace(/[^A-Za-zА-Яа-яЁё0-9_]/g, '') }) }} />
+        </div>
+        <div className="field"><label>Значение</label>
+          <input className="input mono" type="number" value={c.value} onChange={(e) => onChange({ ...c, value: Math.round(Number(e.target.value) || 0) })} />
+        </div>
+      </div>
+      <div className="btnrow">
+        <button className="btn sm primary" disabled={!c.name.trim()} onClick={() => onSave({ ...c, name: c.name.trim(), key: c.key || keyFrom(c.name) })}>Сохранить</button>
+        <button className="btn sm" onClick={onCancel}>Отмена</button>
+        {!isNew && <button className="btn sm" onClick={() => onChange({ ...c, value: 0 })}>Обнулить</button>}
+        {onRemove && (confirmDel
+          ? <button className="btn sm" style={{ marginLeft: 'auto', borderColor: '#ff7a84', color: '#ff7a84' }} onClick={onRemove}>Точно удалить?</button>
+          : <button className="btn sm" style={{ marginLeft: 'auto' }} onClick={() => setConfirmDel(true)}>Удалить</button>)}
       </div>
     </div>
   )

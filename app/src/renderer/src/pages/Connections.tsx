@@ -270,6 +270,25 @@ function ChannelPanel({ id, snap }: { id: 'goodgame' | 'kick' | 'vk'; snap: HubS
       </div>
       {p?.configured && <p className="small muted">{p.live ? 'В эфире · зрителей: ' + (p.viewers ?? 0) : 'Не в эфире'} · режим «только чтение»: писать в этот чат пока можно только на сайте площадки.</p>}
       {saved && <button className="btn sm" onClick={() => void window.hub.reconnect(id)}>Переподключить</button>}
+      {id === 'kick' && <KickLogin snap={snap} />}
+    </div>
+  )
+}
+
+/** Вход в Kick — только для смены названия и категории эфира (чат читается без входа). */
+function KickLogin({ snap }: { snap: HubSnapshot }) {
+  const k = snap.kickAuth
+  const [err, setErr] = useState<string | null>(null)
+  if (!k.available) return null
+  return (
+    <div className="field" style={{ marginTop: 18 }}>
+      <label>Название и категория эфира</label>
+      {k.account
+        ? <div className="btnrow"><span className="small">Вход выполнен: <b>{k.account}</b></span><button className="btn sm" onClick={() => void window.hub.kickLogout()}>Выйти</button></div>
+        : k.pending
+          ? <div className="btnrow"><span className="small muted">Подтвердите вход в открывшемся браузере…</span><button className="btn sm" onClick={() => void window.hub.kickCancel()}>Отмена</button></div>
+          : <div className="btnrow"><button className="btn sm primary" onClick={() => { setErr(null); window.hub.kickLogin().catch((e) => setErr(errText(e))) }}>Войти в Kick</button><span className="small muted">чтобы менять название и игру с главной Crossember</span></div>}
+      {err && <span className="small" style={{ color: '#ff7a84' }}>{err}</span>}
     </div>
   )
 }

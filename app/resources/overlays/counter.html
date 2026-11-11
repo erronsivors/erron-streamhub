@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><title>Crossember · Счётчики</title>
+<link rel="stylesheet" href="/a/overlay.css">
+<style>
+  #stage { position: absolute; left: 16px; right: 16px; top: 16px; display: flex; flex-direction: column; align-items: flex-start; gap: .4em; }
+  #stage.row { flex-direction: row; flex-wrap: wrap; }
+  .item { padding: .45em .9em; display: flex; align-items: baseline; gap: .6em; white-space: nowrap; }
+  .lbl { font: 800 .55em 'Manrope', sans-serif; letter-spacing: .16em; text-transform: uppercase; color: var(--kicker); }
+  .val { font: 800 1em var(--title); font-variant-numeric: tabular-nums; }
+  .bump .val { animation: bump .55s cubic-bezier(.2, 1.4, .4, 1); display: inline-block; }
+  @keyframes bump { 0% { transform: scale(1.35); } 100% { transform: none; } }
+</style></head>
+<body class="t-general"><div id="stage"></div>
+<script src="/a/overlay.js"></script><script src="/a/counter.js"></script>
+</body></html>

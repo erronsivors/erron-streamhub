@@ -87,12 +87,25 @@ function amountSpoken(e: HubEvent): string {
   }
 }
 
-const PLACEHOLDER = /(\{user\}|\{amount\}|\{message\}|\{platform\})/
+/** {user} {amount} {message} {platform} и {ключ} счётчика. */
+const PLACEHOLDER = /(\{[A-Za-zА-Яа-яЁё0-9_]{1,24}\})/
 
-/** Подставить {user} {amount} {message} {platform} в простой текст. */
+/** Текущие значения счётчиков — подключается в index.ts; правила передают снимок в e.vars. */
+let varsSource: () => Record<string, string> = () => ({})
+export function setVarsSource(fn: () => Record<string, string>): void {
+  varsSource = fn
+}
+/** Значение счётчика для куска «{ключ}» или undefined, если такого нет. */
+function counterVar(p: string, e: HubEvent): string | undefined {
+  if (p.length < 3 || p[0] !== '{' || p[p.length - 1] !== '}') return undefined
+  const v = (e.vars ?? varsSource())[p.slice(1, -1)]
+  return typeof v === 'string' ? v : undefined
+}
+
+/** Подставить {user} {amount} {message} {platform} и счётчики {ключ} в простой текст. */
 export function fill(tpl: string, e: HubEvent, message = e.text ?? '', amount = amountText(e)): string {
   return tpl.split(PLACEHOLDER).map((p) =>
-    p === '{user}' ? e.user : p === '{amount}' ? amount : p === '{message}' ? message : p === '{platform}' ? PLATFORM_NAMES[e.platform] : p
+    p === '{user}' ? e.user : p === '{amount}' ? amount : p === '{message}' ? message : p === '{platform}' ? PLATFORM_NAMES[e.platform] : counterVar(p, e) ?? p
   ).join('').trim()
 }
 
@@ -106,7 +119,7 @@ function parts(tpl: string, e: HubEvent): AlertTitlePart[] {
     else if (p === '{amount}') { if (amount) out.push({ t: 'amount', v: amount }) }
     else if (p === '{message}') { if (e.text) out.push({ t: 'text', v: e.text }) }
     else if (p === '{platform}') out.push({ t: 'text', v: PLATFORM_NAMES[e.platform] })
-    else out.push({ t: 'text', v: p })
+    else out.push({ t: 'text', v: counterVar(p, e) ?? p })
   }
   return out
 }

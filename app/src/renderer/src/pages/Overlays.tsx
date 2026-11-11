@@ -4,14 +4,15 @@ import type { AppSettings, ChatOverlaySettings, StatsPeriod, Theme } from '../..
 import { Hint, NumberField, ThemePicker, Toggle } from '../components'
 
 type Key = keyof AppSettings['overlays']
-const KEY: Record<string, Key> = { alert: 'alert', chat: 'chat', 'chat-h': 'chatH', pinned: 'pinned', top: 'top', last: 'last' }
+const KEY: Record<string, Key> = { alert: 'alert', chat: 'chat', 'chat-h': 'chatH', pinned: 'pinned', top: 'top', last: 'last', counter: 'counter' }
 const DESC: Record<string, string> = {
   alert: 'Донаты, подписки, рейды, фолловы — по очереди, по центру экрана.',
   chat: 'Колонка чата: новые сообщения снизу.',
   'chat-h': 'Строка чата внизу экрана: новые сообщения слева.',
   pinned: 'Сообщение, которое вы закрепили в Мультичате (📌).',
   top: 'Самые щедрые зрители за эфир, день, неделю, месяц или всё время. Тестовые донаты не считаются.',
-  last: 'Последний донат (и последняя подписка) — строкой поверх сцены.'
+  last: 'Последний донат (и последняя подписка) — строкой поверх сцены.',
+  counter: 'Смерти, победы и другие счётчики из раздела «Правила». Число коротко подпрыгивает, когда меняется.'
 }
 
 export function Overlays({ snap }: { snap: HubSnapshot }) {
@@ -65,6 +66,7 @@ function OverlayCard({ o, snap }: { o: OverlayInfo; snap: HubSnapshot }) {
           <Toggle on={(cfg as AppSettings['overlays']['last']).showSub} onChange={(v) => set({ showSub: v })} label="Показывать последнюю подписку" />
         </>
       )}
+      {key === 'counter' && <CounterSettings c={cfg as AppSettings['overlays']['counter']} snap={snap} set={set} />}
       {key === 'pinned' && (
         <NumberField label="Размер шрифта" value={(cfg as { fontSize: number }).fontSize} min={12} max={96} suffix="px" onChange={(v) => set({ fontSize: v })} />
       )}
@@ -84,6 +86,37 @@ function ChatSettings({ c, set }: { c: ChatOverlaySettings; set: (p: Record<stri
         <Toggle on={c.showBadges} onChange={(v) => set({ showBadges: v })} label="Бейджи" />
         <Toggle on={c.showPlatform} onChange={(v) => set({ showPlatform: v })} label="Значок площадки" />
         <Toggle on={c.showStatus} onChange={(v) => set({ showStatus: v })} label={<>Строки о сбоях площадок <Hint id="showStatus" /></>} />
+      </div>
+    </>
+  )
+}
+
+function CounterSettings({ c, snap, set }: { c: AppSettings['overlays']['counter']; snap: HubSnapshot; set: (p: Record<string, unknown>) => void }) {
+  const all = c.ids.length === 0
+  const toggle = (id: string): void => {
+    const cur = all ? [] : c.ids.filter((x) => snap.counters.some((k) => k.id === x))
+    set({ ids: cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id] })
+  }
+  return (
+    <>
+      <div className="field">
+        <label>Какие показывать</label>
+        {snap.counters.length ? (
+          <div className="chips">
+            <button className={all ? 'on' : ''} onClick={() => set({ ids: [] })}>Все</button>
+            {snap.counters.map((k) => <button key={k.id} className={!all && c.ids.includes(k.id) ? 'on' : ''} onClick={() => toggle(k.id)}>{k.name}</button>)}
+          </div>
+        ) : <p className="small muted" style={{ margin: 0 }}>Счётчиков пока нет — добавьте в «Правила» → «Счётчики».</p>}
+      </div>
+      <div className="grid g2" style={{ gap: 10 }}>
+        <div className="field">
+          <label>Расположение</label>
+          <div className="seg">
+            <button className={c.layout === 'column' ? 'on' : ''} onClick={() => set({ layout: 'column' })}>Столбиком</button>
+            <button className={c.layout === 'row' ? 'on' : ''} onClick={() => set({ layout: 'row' })}>В строку</button>
+          </div>
+        </div>
+        <NumberField label="Размер шрифта" value={c.fontSize} min={12} max={96} suffix="px" onChange={(v) => set({ fontSize: v })} />
       </div>
     </>
   )

@@ -262,7 +262,7 @@ export class YoutubeConnector implements ChatConnector {
   }
 
   /** Запрос к YouTube Data API v3. */
-  private async api(method: 'GET' | 'POST' | 'DELETE', path: string, query: Record<string, string>, body?: unknown): Promise<Json> {
+  private async api(method: 'GET' | 'POST' | 'PUT' | 'DELETE', path: string, query: Record<string, string>, body?: unknown): Promise<Json> {
     const token = await this.accessToken()
     const res = await fetch(`${API}/${path}?${new URLSearchParams(query)}`, {
       method,
@@ -594,6 +594,35 @@ export class YoutubeConnector implements ChatConnector {
           this.hub.log('youtube', 'info', `Новый тип события YouTube: ${type}`)
         }
     }
+  }
+
+  // ---------- название эфира ----------
+
+  /**
+   * Сменить название (и категорию YouTube) идущей или ближайшей запланированной трансляции.
+   * videos.update заменяет snippet целиком, поэтому сначала читаем его и меняем только название и категорию.
+   * Квота: ~52 ед. (из 10 000 в сутки).
+   */
+  async setTitle(title: string, categoryId: string): Promise<void> {
+    if (!this.tokens) throw new Error('Не выполнен вход в YouTube')
+    const clean = title.replace(/[<>]/g, '').trim().slice(0, 100)
+    if (!clean) throw new Error('Пустое название')
+    let id = this.live ? this.videoId : null
+    if (!id) {
+      for (const status of ['active', 'upcoming']) {
+        const j = await this.api('GET', 'liveBroadcasts', { part: 'id', broadcastStatus: status, broadcastType: 'all', maxResults: '1' })
+        id = s(obj(arr(j.items)[0]).id) || null
+        if (id) break
+      }
+    }
+    if (!id) throw new Error('Нет идущей или запланированной трансляции — начните или запланируйте эфир на YouTube')
+    const v = obj(arr((await this.api('GET', 'videos', { part: 'snippet', id })).items)[0])
+    const sn = obj(v.snippet)
+    if (!v.id) throw new Error('YouTube не нашёл видео трансляции')
+    const snippet: Json = { title: clean, categoryId: /^\d{1,3}$/.test(categoryId) ? categoryId : s(sn.categoryId) || '20', description: s(sn.description) }
+    if (Array.isArray(sn.tags)) snippet.tags = sn.tags
+    if (sn.defaultLanguage) snippet.defaultLanguage = sn.defaultLanguage
+    await this.api('PUT', 'videos', { part: 'snippet' }, { id: s(v.id), snippet })
   }
 
   // ---------- действия ----------

@@ -14,7 +14,11 @@ import { GoodGameConnector } from './core/goodgame'
 import { KickConnector } from './core/kick'
 import { VkConnector } from './core/vk'
 import { YoutubeConnector } from './core/youtube'
-import { AlertEngine, fill } from './core/alerts'
+import { AlertEngine, fill, setVarsSource } from './core/alerts'
+import { Counters } from './core/counters'
+import { Profiles, type ProfilePart } from './core/profile'
+import { KickAuth } from './core/kickauth'
+import { StreamInfo, INFO_PLATFORMS, type InfoPlatform } from './core/streaminfo'
 import { TemplateStore, sanitizeTemplate, sanitizeObs } from './core/templates'
 import { RuleEngine } from './core/rules'
 import { MediaLibrary } from './core/media'
@@ -53,6 +57,10 @@ let media: MediaLibrary
 let tts: WindowsTts
 let templates: TemplateStore
 let rules: RuleEngine
+let counters: Counters
+let profiles: Profiles
+let kickAuth: KickAuth
+let streamInfo: StreamInfo
 let da: DonationAlertsConnector
 let dp: DonatePayConnector
 let dx: DonateXConnector
@@ -78,6 +86,10 @@ function snapshot(): HubSnapshot {
     media: media.list(),
     templates: templates.all(),
     rules: rules.state(),
+    counters: counters.list(),
+    profile: profiles.state(),
+    streamInfo: streamInfo.state(),
+    kickAuth: kickAuth.state(),
     alertOverlays: server ? server.openCount('alert') : 0,
     float: { open: floatChat?.isOpen ?? false, editing: floatChat?.isEditing ?? false, hotkey: FLOAT_HOTKEY.replace('CommandOrControl', 'Ctrl') }
   }
@@ -188,6 +200,10 @@ app.whenReady().then(async () => {
   youtube.onChange = pushUpdate
   const goodgame = new GoodGameConnector(hub, settings, images, join(app.getPath('userData'), 'cache'))
   const kick = new KickConnector(hub, settings, images)
+  kickAuth = new KickAuth(hub, secrets, resourcesDir)
+  kickAuth.onChange = pushUpdate
+  streamInfo = new StreamInfo(store, settings, twitch, youtube, kickAuth)
+  streamInfo.on('change', pushUpdate)
   const vk = new VkConnector(hub, settings, images)
   chats.add(goodgame)
   chats.add(kick)
@@ -208,13 +224,17 @@ app.whenReady().then(async () => {
   const runObs = (a: Parameters<ObsConnector['run']>[0], e: HubEvent): Promise<void> => obs.run(a, (s) => fill(s, e))
   alerts = new AlertEngine(hub, settings, tts, runObs)
   alerts.on('change', pushUpdate)
+  counters = new Counters(store)
+  counters.on('change', pushUpdate)
+  setVarsSource(() => counters.vars())
   rules = new RuleEngine(hub, store, settings, templates, {
     play: (plan, e, force) => alerts.play(plan, e, force),
     obs: runObs,
     isLive: () => obs.state.streaming || !!twitch?.live || !!youtube?.live
-  })
+  }, counters)
   rules.on('change', () => { syncHotkeys(); pushUpdate() })
   obs.onStream = (live) => rules.fireService(live ? 'stream_start' : 'stream_end')
+  profiles = new Profiles(app.getPath('userData'), store, settings, rules, templates, counters)
   syncHotkeys()
   stats = new Stats(store, () => (obs.state.streaming ? obs.state.streamStartedAt : null))
   sounds = new SoundLibrary(app.getPath('userData'), store)
@@ -231,7 +251,7 @@ app.whenReady().then(async () => {
   server = new OverlayServer(hub, store, settings, images, resourcesDir, app.getAppPath(), {
     send: (text) => chats.send(text, chats.states().filter((p) => p.canSend).map((p) => p.id), 'broadcaster'),
     pin: (id) => hub.togglePin(id)
-  }, { alerts, stats, sounds, media, tts })
+  }, { alerts, stats, sounds, media, tts, counters })
   obs.onChange = pushUpdate
   server.onClients = pushUpdate
   floatChat = new FloatChat(settings, hub, () => server.overlayUrl('float'))
@@ -304,6 +324,53 @@ app.whenReady().then(async () => {
   handle('hub:ruleTest', (id, kind) => rules.test(str(id, 100), sampleEvent(kind)))
   handle('hub:rulesFlags', (p) => rules.setFlags((p && typeof p === 'object' ? p : {}) as { enabled?: unknown; dryRun?: unknown }))
   handle('hub:rulesClearLog', () => rules.clearLog())
+  // ---------- Название и категория эфира ----------
+  handle('hub:infoDraft', (v) => streamInfo.setDraft(v))
+  handle('hub:infoApply', () => streamInfo.apply())
+  handle('hub:infoSuggest', (q) => streamInfo.suggest(str(q, 100)))
+  handle('hub:infoFromTwitch', () => streamInfo.loadFromTwitch())
+  handle('hub:infoOpen', (p) => { if ((INFO_PLATFORMS as readonly unknown[]).includes(p)) return streamInfo.openManual(p as InfoPlatform) })
+  handle('hub:kickLogin', () => kickAuth.login())
+  handle('hub:kickCancel', () => kickAuth.cancelLogin())
+  handle('hub:kickLogout', () => kickAuth.logout())
+  // ---------- Профиль: сохранить в файл / загрузить ----------
+  handle('hub:profileExport', async (withMedia) => {
+    if (!win) return null
+    const d = new Date()
+    const stamp = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+    const r = await dialog.showSaveDialog(win, {
+      title: 'Сохранить профиль Crossember',
+      defaultPath: join(app.getPath('documents'), `Crossember-профиль-${stamp}.crossember`),
+      filters: [{ name: 'Профиль Crossember', extensions: ['crossember'] }]
+    })
+    if (r.canceled || !r.filePath) return null
+    return profiles.exportTo(r.filePath, withMedia !== false)
+  })
+  handle('hub:profilePick', async () => {
+    if (!win) return null
+    const r = await dialog.showOpenDialog(win, { title: 'Загрузить профиль Crossember', properties: ['openFile'], filters: [{ name: 'Профиль Crossember', extensions: ['crossember'] }] })
+    if (r.canceled || !r.filePaths[0]) return null
+    return profiles.inspect(r.filePaths[0])
+  })
+  handle('hub:profileApply', async (parts) => {
+    await profiles.apply((Array.isArray(parts) ? parts : []).filter((p): p is ProfilePart => typeof p === 'string'))
+    pushUpdate()
+  })
+  handle('hub:profileCancel', () => profiles.cancel())
+  handle('hub:profileUndo', async () => {
+    await profiles.undo()
+    pushUpdate()
+  })
+  // ---------- Счётчики ----------
+  handle('hub:counterPut', (c) => counters.put(c))
+  handle('hub:counterRemove', (id) => {
+    counters.remove(str(id, 100))
+    rules.forgetCounter(String(id))
+  })
+  handle('hub:counterApply', (id, op, n) => {
+    const v = typeof n === 'number' && Number.isFinite(n) ? Math.abs(Math.round(n)) : 1
+    return counters.apply(str(id, 100), op === 'sub' ? 'sub' : op === 'set' ? 'set' : 'add', v)
+  })
   // ---------- Шаблоны алертов (конструктор) ----------
   handle('hub:templatePut', (t) => templates.put(t))
   handle('hub:templateRemove', (id) => {
@@ -439,6 +506,7 @@ function syncHotkeys(): void {
 app.on('before-quit', () => {
   for (const accel of ruleKeys.keys()) globalShortcut.unregister(accel)
   rules?.dispose()
+  kickAuth?.cancelLogin()
   floatChat?.close()
   chats.stopAll()
   for (const d of donations) d.stop()

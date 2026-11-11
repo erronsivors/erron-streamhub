@@ -1,6 +1,7 @@
 import type { ConnStatus, HubSnapshot, Platform } from '../../../main/core/types'
 import type { Page } from '../App'
 import { EventRow, PlatIcon, useNow } from '../ui'
+import { StreamInfoCard } from './StreamInfoCard'
 
 /** Группы подключений на главной: сразу видно, что работает, а что отвалилось. */
 const GROUPS: { title: string; ids: Platform[] }[] = [
@@ -87,6 +88,8 @@ export function Home({ snap, go }: { snap: HubSnapshot; go: (p: Page, sel?: Plat
           </div>
         </div>
       </div>
+
+      <div style={{ marginTop: 18 }}><StreamInfoCard snap={snap} go={go} /></div>
 
       <div className="card" style={{ marginTop: 18 }}>
         <h3>Подключения <span className="small muted" style={{ fontWeight: 500, marginLeft: 8 }}>активно {okCount} из {total}</span> <button className="r btn sm" onClick={() => go('connections')}>Все →</button></h3>

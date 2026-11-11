@@ -54,29 +54,29 @@ export function blankTemplate(): AlertTemplate {
 
 // ---------- сборка предпросмотра (как AlertEngine.enqueue, но на тестовых данных) ----------
 type Part = { t: 'text' | 'amount'; v: string }
-function parts(tpl: string, s: (typeof SAMPLE)[string]): Part[] {
+function parts(tpl: string, s: (typeof SAMPLE)[string], vars: Record<string, string> = {}): Part[] {
   const out: Part[] = []
-  for (const p of tpl.split(/(\{user\}|\{amount\}|\{message\}|\{platform\})/)) {
+  for (const p of tpl.split(/(\{[A-Za-zА-Яа-яЁё0-9_]{1,24}\})/)) {
     if (!p) continue
     if (p === '{user}') out.push({ t: 'text', v: s.user })
     else if (p === '{amount}') { if (s.amount) out.push({ t: 'amount', v: s.amount }) }
     else if (p === '{message}') { if (s.message) out.push({ t: 'text', v: s.message }) }
     else if (p === '{platform}') out.push({ t: 'text', v: s.platform })
-    else out.push({ t: 'text', v: p })
+    else out.push({ t: 'text', v: (p[0] === '{' && vars[p.slice(1, -1)]) || p })
   }
   return out
 }
-const fillText = (tpl: string, s: (typeof SAMPLE)[string]): string => parts(tpl, s).map((p) => p.v).join('')
+const fillText = (tpl: string, s: (typeof SAMPLE)[string], vars: Record<string, string> = {}): string => parts(tpl, s, vars).map((p) => p.v).join('')
 
-export function previewItem(t: AlertTemplate, kind: string, volume: number): unknown {
+export function previewItem(t: AlertTemplate, kind: string, volume: number, vars: Record<string, string> = {}): unknown {
   const s = SAMPLE[kind] ?? SAMPLE.donation
   const extra = t.extendByMessage && s.message ? Math.min(s.message.length * 40, 5000) : 0
   return {
     id: 'preview', kind, theme: t.theme, durationMs: t.durationMs + extra, test: true,
     layers: t.layers.filter((l) => !l.hidden).map((l) => ({
       ...l,
-      parts: l.type === 'card' || l.type === 'text' ? parts(l.text, s) : undefined,
-      kickerText: l.type === 'card' ? fillText(l.kicker, s) : undefined,
+      parts: l.type === 'card' || l.type === 'text' ? parts(l.text, s, vars) : undefined,
+      kickerText: l.type === 'card' ? fillText(l.kicker, s, vars) : undefined,
       message: l.type === 'card' && l.showMessage && s.message ? s.message : null,
       src: (l.type === 'image' || l.type === 'video') && l.media ? `/m/${l.media.slice(2)}` : l.type === 'sound' && l.sound.startsWith('custom:') ? `/s/${l.sound.slice(7)}` : undefined,
       builtin: l.type === 'sound' && l.sound !== 'none' && !l.sound.startsWith('custom:') ? l.sound : undefined,
@@ -258,7 +258,8 @@ function Canvas({ t, kind, time, total, playing, sel, snap, theme, volume, onSel
   const stageRef = useRef<HTMLDivElement>(null)
   const handle = useRef<KitHandle | null>(null)
   const [k, setK] = useState(0.4)
-  const item = useMemo(() => previewItem(t, kind, volume), [t, kind, volume])
+  const counters = snap.counters
+  const item = useMemo(() => previewItem(t, kind, volume, Object.fromEntries(counters.map((c) => [c.key, String(c.value)]))), [t, kind, volume, counters])
   const url = (src: string): string => serverUrl(snap, src)
 
   useLayoutEffect(() => {
@@ -522,7 +523,7 @@ function TemplateProps({ t, onChange }: { t: AlertTemplate; onChange: (p: Partia
       </div>
       <Toggle on={t.extendByMessage} onChange={(v) => onChange({ extendByMessage: v })} label="Удлинять на время чтения сообщения (до +5 с)" />
       <p className="small muted">Слои с длиной «до конца» растягиваются вместе с алертом. Если озвучка длиннее алерта, он сам продлится, пока голос не договорит.</p>
-      <p className="small muted">Подстановки в текстах: <code>{'{user}'}</code> ник, <code>{'{amount}'}</code> сумма, <code>{'{message}'}</code> сообщение, <code>{'{platform}'}</code> площадка.</p>
+      <p className="small muted">Подстановки в текстах: <code>{'{user}'}</code> ник, <code>{'{amount}'}</code> сумма, <code>{'{message}'}</code> сообщение, <code>{'{platform}'}</code> площадка, а ещё счётчики из «Правил» — например <code>{'{смерти}'}</code>.</p>
     </>
   )
 }
