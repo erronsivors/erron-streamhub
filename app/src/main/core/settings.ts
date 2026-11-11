@@ -144,6 +144,19 @@ export interface AppSettings {
   /** Колесо: режим, как считать сектора, длительность прокрутки. */
   wheel: { mode: 'normal' | 'elim'; weighting: 'weight' | 'equal'; durationSec: number }
   giveaway: GiveawaySettings
+  analytics: AnalyticsSettings
+}
+
+/** Локальная аналитика (данные — в таблицах viewers и streams). */
+export interface AnalyticsSettings {
+  /** Запоминать зрителей чата: только ник, площадка и счётчики, без текста сообщений. */
+  chat: boolean
+  /** Записывать онлайн площадок раз в минуту во время эфира. */
+  online: boolean
+  /** Ядро аудитории: был на стольких эфирах и заходил за последние 30 дней. */
+  coreMin: number
+  /** Ники, которые не считать (боты), через запятую. */
+  ignore: string
 }
 
 /** Розыгрыш (участники и победители хранятся отдельно, в giveaway.v1). */
@@ -263,7 +276,8 @@ export const DEFAULTS: AppSettings = {
   giveaway: {
     keyword: '!участвую', rubPerTicket: 100, maxTickets: 20, defaultMin: 3, winners: 1, answerSec: 60, announce: true,
     startText: 'Розыгрыш: {приз}! Пишите {слово} в чат, чтобы участвовать.', winText: 'Победитель розыгрыша «{приз}»: {победители}! Напишите в чат 🎉'
-  }
+  },
+  analytics: { chat: true, online: true, coreMin: 3, ignore: 'nightbot, streamelements, streamlabs, moobot, fossabot, wizebot, botrix, kicklet, kickbot' }
 }
 
 const theme = (v: unknown, d: Theme): Theme => (v === 'general' || v === 'campfire' ? v : d)
@@ -465,6 +479,11 @@ export function sanitize(input: unknown, base: AppSettings = DEFAULTS): AppSetti
         startText: text(o.startText, b.startText, 300),
         winText: text(o.winText, b.winText, 300)
       }
+    })(),
+    analytics: (() => {
+      const o = obj(i.analytics)
+      const b = base.analytics ?? DEFAULTS.analytics
+      return { chat: bool(o.chat, b.chat), online: bool(o.online, b.online), coreMin: int(o.coreMin, b.coreMin, 2, 100), ignore: text(o.ignore, b.ignore, 2000) }
     })(),
     auction: (() => {
       const o = obj(i.auction)

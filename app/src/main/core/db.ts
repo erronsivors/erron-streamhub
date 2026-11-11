@@ -25,6 +25,11 @@ export class Store {
     if (!cols.some((c) => c.name === 'amount_rub')) this.db.exec('ALTER TABLE events ADD COLUMN amount_rub REAL')
   }
 
+  /** Прямой доступ к базе для модулей со своими таблицами (аналитика). */
+  get sql(): DatabaseSync {
+    return this.db
+  }
+
   get<T>(key: string, fallback: T): T {
     const row = this.db.prepare('SELECT value FROM settings WHERE key = ?').get(key) as { value: string } | undefined
     if (!row) return fallback

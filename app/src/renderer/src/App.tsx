@@ -13,12 +13,13 @@ import { Auction } from './pages/Auction'
 import { Wheel } from './pages/Wheel'
 import { Goal } from './pages/Goal'
 import { Giveaway } from './pages/Giveaway'
+import { Analytics } from './pages/Analytics'
 import { Feedback } from './pages/Feedback'
 import { Wizard } from './pages/Wizard'
 import { ModeContext } from './components'
 import { useNow, fmtDuration } from './ui'
 
-export type Page = 'home' | 'chat' | 'events' | 'alerts' | 'rules' | 'auction' | 'wheel' | 'goal' | 'giveaway' | 'overlays' | 'connections' | 'settings' | 'feedback'
+export type Page = 'home' | 'chat' | 'events' | 'alerts' | 'rules' | 'auction' | 'wheel' | 'goal' | 'giveaway' | 'analytics' | 'overlays' | 'connections' | 'settings' | 'feedback'
 
 const NAV: { id: Page; label: string; ico: string; soon?: boolean }[] = [
   { id: 'home', label: 'Главная', ico: '⌂' },
@@ -30,12 +31,13 @@ const NAV: { id: Page; label: string; ico: string; soon?: boolean }[] = [
   { id: 'wheel', label: 'Колесо', ico: '◎' },
   { id: 'goal', label: 'Сбор средств', ico: '◔' },
   { id: 'giveaway', label: 'Розыгрыш', ico: '❖' },
+  { id: 'analytics', label: 'Аналитика', ico: '◫' },
   { id: 'overlays', label: 'Оверлеи', ico: '▣' },
   { id: 'connections', label: 'Подключения', ico: '⏚' },
   { id: 'settings', label: 'Настройки', ico: '⚙' }
 ]
 
-const LATER = ['Локальная аналитика']
+const LATER: string[] = []
 
 export function App() {
   const [snap, setSnap] = useState<HubSnapshot | null>(null)
@@ -79,7 +81,7 @@ export function App() {
               {n.id === 'auction' && pendingBets > 0 && <span className="nav-cnt" title="Ставки ждут решения">{pendingBets}</span>}
             </button>
           ))}
-          <div className="side-sep">Дальше по плану</div>
+          {LATER.length > 0 && <div className="side-sep">Дальше по плану</div>}
           {LATER.map((l) => (
             <div key={l} className="nav" style={{ cursor: 'default', opacity: 0.45 }}>
               <span className="ico">·</span>
@@ -133,6 +135,7 @@ export function App() {
           {page === 'wheel' && <Wheel snap={snap} />}
           {page === 'goal' && <Goal snap={snap} />}
           {page === 'giveaway' && <Giveaway snap={snap} />}
+          {page === 'analytics' && <Analytics snap={snap} />}
           {page === 'feedback' && <Feedback snap={snap} />}
         </main>
       </div>

@@ -14,6 +14,7 @@ import type { GoalInput } from '../main/core/goal'
 import type { ProfilePart, ProfileSummary } from '../main/core/profile'
 import type { ObsCatalog } from '../main/core/obs'
 import type { TtsVoice } from '../main/core/tts'
+import type { AnalyticsPeriod, AnalyticsReport, StreamSamples, ViewerRef } from '../main/core/analytics'
 
 type DeepPartial<T> = { [K in keyof T]?: T[K] extends object ? DeepPartial<T[K]> : T[K] }
 type Role = 'broadcaster' | 'bot'
@@ -43,6 +44,13 @@ const api = {
   alertRemove: (id: string) => call('hub:alertRemove', id),
   alertReplay: (eventId: string) => call<boolean>('hub:alertReplay', eventId),
   stats: (period: string) => call<StatsSnapshot>('hub:stats', period),
+  analytics: (period: AnalyticsPeriod) => call<AnalyticsReport>('hub:analytics', period),
+  analyticsStream: (id: string) => call<StreamSamples | null>('hub:analyticsStream', id),
+  analyticsMerge: (refs: ViewerRef[]) => call('hub:analyticsMerge', refs),
+  analyticsUnmerge: (ref: ViewerRef) => call('hub:analyticsUnmerge', ref),
+  analyticsDismiss: (key: string) => call('hub:analyticsDismiss', key),
+  analyticsForget: (id: string) => call('hub:analyticsForget', id),
+  analyticsClear: () => call('hub:analyticsClear'),
   soundAdd: () => call<SoundInfo | null>('hub:soundAdd'),
   soundRemove: (id: string) => call('hub:soundRemove', id),
   rulePut: (r: Rule) => call<Rule>('hub:rulePut', r),

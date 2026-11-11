@@ -23,6 +23,7 @@ import { Auction } from './core/auction'
 import { Wheel } from './core/wheel'
 import { Fundraiser, type GoalReached } from './core/goal'
 import { Giveaway, type GiveawayWinner } from './core/giveaway'
+import { Analytics, CHAT_PLATFORMS, isAnalyticsPeriod, type ChatPlatform } from './core/analytics'
 import { Profiles, type ProfilePart } from './core/profile'
 import { KickAuth } from './core/kickauth'
 import { StreamInfo, INFO_PLATFORMS, type InfoPlatform } from './core/streaminfo'
@@ -103,6 +104,7 @@ let auction: Auction
 let wheel: Wheel
 let goal: Fundraiser
 let giveaway: Giveaway
+let analytics: Analytics
 let profiles: Profiles
 let kickAuth: KickAuth
 let streamInfo: StreamInfo
@@ -332,6 +334,19 @@ app.whenReady().then(async () => {
   profiles = new Profiles(app.getPath('userData'), store, settings, rules, templates, counters)
   syncHotkeys()
   stats = new Stats(store, () => (obs.state.streaming ? obs.state.streamStartedAt : null))
+  // Аналитика: эфир идёт, если OBS в эфире или площадка сообщает «в эфире»; свои аккаунты не считаются.
+  analytics = new Analytics(store, settings, () => {
+    const ps = chats.states()
+    const viewers: Partial<Record<ChatPlatform, number>> = {}
+    for (const p of ps) if (p.live && p.viewers !== null && (CHAT_PLATFORMS as readonly string[]).includes(p.id)) viewers[p.id as ChatPlatform] = p.viewers
+    const bot = twitch.state().bot?.name
+    return {
+      live: obs.state.streaming || ps.some((p) => p.live),
+      startedAt: obs.state.streaming ? obs.state.streamStartedAt : null,
+      viewers,
+      own: [...ps.map((p) => p.account), bot].filter((x): x is string => !!x)
+    }
+  })
   sounds = new SoundLibrary(app.getPath('userData'), store)
   hub.seed(store.recentEvents(100))
   if (!secrets.available()) hub.log('hub', 'error', 'Шифрование Windows недоступно — токены сохранять нельзя')
@@ -340,6 +355,8 @@ app.whenReady().then(async () => {
   hub.on('event', (e: HubEvent) => {
     // Сообщения чата на диск не пишем (приватность); события — с пометкой test, статистика тестовые не считает.
     if (e.type !== 'message') store.addEvent(e)
+    // Для аналитики — только ник и +1 к счётчику, без текста (если включено в «Аналитике»).
+    else analytics.onEvent(e)
     pushUpdate()
   })
 
@@ -593,6 +610,14 @@ app.whenReady().then(async () => {
     const p = (['stream', 'today', 'week', 'month', 'all'] as StatsPeriod[]).includes(period as StatsPeriod) ? (period as StatsPeriod) : 'stream'
     return stats.snapshot(p)
   })
+  // ---------- Аналитика (только локально) ----------
+  handle('hub:analytics', (period) => analytics.report(isAnalyticsPeriod(period) ? period : 'month'))
+  handle('hub:analyticsStream', (id) => analytics.stream(str(id, 100)))
+  handle('hub:analyticsMerge', (refs) => analytics.merge(refs))
+  handle('hub:analyticsUnmerge', (ref) => analytics.unmerge(ref))
+  handle('hub:analyticsDismiss', (key) => analytics.dismiss(key))
+  handle('hub:analyticsForget', (id) => analytics.forget(id))
+  handle('hub:analyticsClear', () => analytics.clear())
   handle('hub:soundAdd', async () => {
     if (!win) return null
     const r = await dialog.showOpenDialog(win, { title: 'Звук для алерта', properties: ['openFile'], filters: [{ name: 'Звук', extensions: ['mp3', 'wav', 'ogg'] }] })
@@ -698,6 +723,7 @@ app.on('before-quit', () => {
   wheel?.stop()
   goal?.stop()
   giveaway?.stop()
+  analytics?.stop()
   kickAuth?.cancelLogin()
   floatChat?.close()
   chats.stopAll()
