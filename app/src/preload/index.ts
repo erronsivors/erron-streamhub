@@ -44,6 +44,7 @@ const api = {
   alertRemove: (id: string) => call('hub:alertRemove', id),
   alertReplay: (eventId: string) => call<boolean>('hub:alertReplay', eventId),
   stats: (period: string) => call<StatsSnapshot>('hub:stats', period),
+  chatTest: () => call('hub:chatTest'),
   analytics: (period: AnalyticsPeriod) => call<AnalyticsReport>('hub:analytics', period),
   analyticsStream: (id: string) => call<StreamSamples | null>('hub:analyticsStream', id),
   analyticsMerge: (refs: ViewerRef[]) => call('hub:analyticsMerge', refs),

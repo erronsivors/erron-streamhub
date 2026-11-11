@@ -492,3 +492,48 @@ select.input { cursor: pointer; }
 .ix-st.live { color: var(--light); border-color: #ffb27a55; }
 .ix-bar { height: 6px; border-radius: 3px; background: var(--coal-2); margin-top: 12px; overflow: hidden; }
 .ix-bar i { display: block; height: 100%; border-radius: 3px; background: var(--light); }
+
+/* ---------- Оформление чата ---------- */
+.cs-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 18px; align-items: start; }
+@media (max-width: 1150px) { .cs-grid { grid-template-columns: minmax(0, 1fr); } }
+.cs-settings { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.cs-block { padding: 0; }
+.cs-block-head { display: flex; align-items: center; gap: 10px; width: 100%; padding: 15px 20px; border: 0; background: none; color: var(--ink); font: 700 15px var(--f-display); cursor: pointer; text-align: left; }
+.cs-chev { color: var(--muted); transition: transform .15s; font-size: 12px; }
+.cs-block.open .cs-chev { transform: rotate(90deg); }
+.cs-block-body { padding: 0 20px 18px; display: flex; flex-direction: column; gap: 6px; }
+.cs-row3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+@media (max-width: 1400px) { .cs-row3 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.cs-row3 .field { margin-bottom: 8px; }
+.cs-row3 select.input, .cs-block select.input { width: 100%; font: 600 13px var(--f-text); padding: 9px 10px; }
+.cs-toggles { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 18px; margin-bottom: 4px; }
+.cs-note { margin: 0 0 8px; }
+.cs-checks { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 6px 14px; margin-bottom: 10px; }
+.cs-check { display: inline-flex; align-items: center; gap: 8px; font-weight: 600; font-size: 14px; cursor: pointer; }
+.cs-check input { accent-color: var(--light); width: 15px; height: 15px; }
+.cs-colors { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px 14px; }
+.cs-color { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--ink-2); cursor: pointer; }
+.cs-color input[type='color'], .cs-swatch { width: 30px; height: 26px; padding: 0; border: 1px solid var(--line-2); border-radius: 7px; background: none; cursor: pointer; flex: none; }
+.cs-color input[type='color']::-webkit-color-swatch-wrapper, .cs-swatch::-webkit-color-swatch-wrapper { padding: 3px; }
+.cs-color input[type='color']::-webkit-color-swatch, .cs-swatch::-webkit-color-swatch { border: 0; border-radius: 4px; }
+.cs-pair { display: flex; align-items: flex-end; gap: 8px; }
+.cs-pair .field { flex: 1; }
+.cs-pair .cs-swatch { margin-bottom: 22px; height: 38px; width: 38px; }
+.cs-text { display: flex; flex-direction: column; gap: 4px; }
+.cs-preview-col { position: sticky; top: 12px; min-width: 0; }
+.cs-preview h3 { flex-wrap: wrap; }
+.cs-bd button { padding: 5px 10px; font-size: 12px; }
+.cs-stage { position: relative; height: min(440px, 52vh); border-radius: 12px; overflow: hidden; border: 1px solid var(--line-2); }
+.cs-stage.m-h { height: 120px; }
+.cs-stage.bd-dark { background: #121214; }
+.cs-stage.bd-light { background: #e9e7e4; }
+.cs-stage.bd-check { background-color: #2a2a2e; background-image: linear-gradient(45deg, #333338 25%, transparent 25%, transparent 75%, #333338 75%), linear-gradient(45deg, #333338 25%, transparent 25%, transparent 75%, #333338 75%); background-size: 24px 24px; background-position: 0 0, 12px 12px; }
+.cs-stage.bd-game { background: radial-gradient(ellipse at 70% 30%, #4a6a52 0%, #24352c 45%, #121a16 100%); }
+.cxp { position: absolute; inset: 0; font-size: var(--fs); line-height: 1.35; }
+.cx-list { position: absolute; left: 0; right: 0; bottom: 0; padding: 12px; display: flex; flex-direction: column; }
+.cx-list.top { top: 0; bottom: auto; }
+.cx-list.m-h { inset: 0; flex-direction: row; align-items: center; overflow: hidden; }
+.cx-list.m-h .msg { flex: none; white-space: nowrap; max-width: 70%; overflow: hidden; text-overflow: ellipsis; }
+.cx-list.m-h .ev-head { display: inline-flex; flex-wrap: nowrap; }
+.cx-list.m-h .ev-body { display: inline; margin-left: .5em; }
+.cs-actions { margin-top: 12px; }

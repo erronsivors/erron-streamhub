@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import type { HubSnapshot, OverlayInfo } from '../../../main/core/types'
+import type { Page } from '../App'
 import type { AppSettings, ChatOverlaySettings, StatsPeriod, Theme } from '../../../main/core/settings'
 import { Hint, NumberField, ThemePicker, Toggle } from '../components'
 import { DOCK_BLOCKS, DOCK_PRESETS, type DockBlock } from '../../../main/core/dock'
@@ -21,7 +22,7 @@ const DESC: Record<string, string> = {
   giveaway: 'Во время приёма — слово для участия, число участников и таймер. При выборе ники прокручиваются до победителя.'
 }
 
-export function Overlays({ snap }: { snap: HubSnapshot }) {
+export function Overlays({ snap, go }: { snap: HubSnapshot; go?: (p: Page) => void }) {
   return (
     <>
       <div className="head">
@@ -38,7 +39,7 @@ export function Overlays({ snap }: { snap: HubSnapshot }) {
         <>
         <DockCard snap={snap} url={snap.server.dockUrl} />
         <div className="grid g2">
-          {snap.server.overlays.map((o) => <OverlayCard key={o.id} o={o} snap={snap} />)}
+          {snap.server.overlays.map((o) => <OverlayCard key={o.id} o={o} snap={snap} go={go} />)}
         </div>
         </>
       )}
@@ -105,7 +106,7 @@ function DockCard({ snap, url }: { snap: HubSnapshot; url: string }) {
   )
 }
 
-function OverlayCard({ o, snap }: { o: OverlayInfo; snap: HubSnapshot }) {
+function OverlayCard({ o, snap, go }: { o: OverlayInfo; snap: HubSnapshot; go?: (p: Page) => void }) {
   const [copied, setCopied] = useState(false)
   const key = KEY[o.id]
   const cfg = snap.settings.overlays[key]
@@ -124,6 +125,7 @@ function OverlayCard({ o, snap }: { o: OverlayInfo; snap: HubSnapshot }) {
         <ThemePicker value={cfg.theme} onChange={(t: Theme) => set({ theme: t })} />
       </div>
       {(key === 'chat' || key === 'chatH') && <ChatSettings c={cfg as ChatOverlaySettings} set={set} />}
+      {(key === 'chat' || key === 'chatH') && go && <button className="btn sm primary" style={{ marginTop: 10 }} onClick={() => go('chatstyle')}>Оформление чата: анимации, события, шрифты →</button>}
       {key === 'top' && <TopSettings c={cfg as AppSettings['overlays']['top']} set={set} />}
       {key === 'last' && (
         <>

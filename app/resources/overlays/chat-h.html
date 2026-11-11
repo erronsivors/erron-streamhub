@@ -2,13 +2,12 @@
 <html lang="ru"><head><meta charset="utf-8"><title>Crossember · Чат горизонтальный</title>
 <link rel="stylesheet" href="/a/overlay.css">
 <style>
-  #list { position: absolute; inset: 0; display: flex; flex-direction: row-reverse; justify-content: flex-end; align-items: center;
-          gap: 10px; padding: 0 12px; overflow: hidden; }
-  .msg { flex: none; white-space: nowrap; max-width: 60vw; overflow: hidden; text-overflow: ellipsis; padding: .4em .8em;
-         animation: in .3s ease; transition: opacity .6s; }
-  .msg.gone { opacity: 0; }
-  .sep { color: var(--muted); }
-  @keyframes in { from { opacity: 0; transform: translateX(-16px); } }
+  /* Раскладка; оформление сообщений приходит из Crossember (настройки чата). */
+  #list { position: absolute; inset: 0; display: flex; flex-direction: row; justify-content: flex-start; align-items: center;
+          padding: 0 12px; overflow: hidden; }
+  .msg { flex: none; white-space: nowrap; max-width: 60vw; overflow: hidden; text-overflow: ellipsis; }
+  .msg .ev-head { display: inline-flex; flex-wrap: nowrap; }
+  .msg .ev-body { display: inline; margin: 0 0 0 .5em; }
 </style></head>
 <body class="t-general" data-mode="h"><div id="list"></div>
 <script src="/a/overlay.js"></script><script src="/a/chat.js"></script>

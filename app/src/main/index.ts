@@ -114,6 +114,12 @@ let dx: DonateXConnector
 let boosty: BoostyConnector
 let donations: DonationConnector[] = []
 
+/** Свои аккаунты (каналы на площадках и бот Twitch) — не зрители. */
+function ownAccounts(): string[] {
+  const bot = twitch.state().bot?.name
+  return [...chats.states().map((p) => p.account), bot].filter((x): x is string => !!x)
+}
+
 function snapshot(): HubSnapshot {
   return {
     connections: hub.connections(),
@@ -339,12 +345,11 @@ app.whenReady().then(async () => {
     const ps = chats.states()
     const viewers: Partial<Record<ChatPlatform, number>> = {}
     for (const p of ps) if (p.live && p.viewers !== null && (CHAT_PLATFORMS as readonly string[]).includes(p.id)) viewers[p.id as ChatPlatform] = p.viewers
-    const bot = twitch.state().bot?.name
     return {
       live: obs.state.streaming || ps.some((p) => p.live),
       startedAt: obs.state.streaming ? obs.state.streamStartedAt : null,
       viewers,
-      own: [...ps.map((p) => p.account), bot].filter((x): x is string => !!x)
+      own: ownAccounts()
     }
   })
   sounds = new SoundLibrary(app.getPath('userData'), store)
@@ -387,7 +392,7 @@ app.whenReady().then(async () => {
       'wheel.spin': () => { wheel.spin() },
       counter: (id, op) => counters.apply(str(id, 100), op === 'sub' ? 'sub' : 'add', 1)
     }
-  }, { alerts, stats, sounds, media, tts, counters, auction, wheel, goal, giveaway })
+  }, { alerts, stats, sounds, media, tts, counters, auction, wheel, goal, giveaway, own: ownAccounts })
   obs.onChange = pushUpdate
   server.onClients = pushUpdate
   floatChat = new FloatChat(settings, hub, () => server.overlayUrl('float'))
@@ -610,6 +615,7 @@ app.whenReady().then(async () => {
     const p = (['stream', 'today', 'week', 'month', 'all'] as StatsPeriod[]).includes(period as StatsPeriod) ? (period as StatsPeriod) : 'stream'
     return stats.snapshot(p)
   })
+  handle('hub:chatTest', () => server.testChat())
   // ---------- Аналитика (только локально) ----------
   handle('hub:analytics', (period) => analytics.report(isAnalyticsPeriod(period) ? period : 'month'))
   handle('hub:analyticsStream', (id) => analytics.stream(str(id, 100)))

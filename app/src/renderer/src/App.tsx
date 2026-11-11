@@ -14,13 +14,14 @@ import { Wheel } from './pages/Wheel'
 import { Goal } from './pages/Goal'
 import { Giveaway } from './pages/Giveaway'
 import { Analytics } from './pages/Analytics'
+import { ChatStyle } from './pages/ChatStyle'
 import { ALERT_TABS, INTERACTIVE, InteractiveHub, SubTabs } from './pages/Interactive'
 import { Feedback } from './pages/Feedback'
 import { Wizard } from './pages/Wizard'
 import { ModeContext } from './components'
 import { useNow, fmtDuration } from './ui'
 
-export type Page = 'home' | 'chat' | 'events' | 'alerts' | 'rules' | 'interactive' | 'auction' | 'wheel' | 'goal' | 'giveaway' | 'analytics' | 'overlays' | 'connections' | 'settings' | 'feedback'
+export type Page = 'home' | 'chat' | 'events' | 'alerts' | 'rules' | 'interactive' | 'auction' | 'wheel' | 'goal' | 'giveaway' | 'analytics' | 'overlays' | 'chatstyle' | 'connections' | 'settings' | 'feedback'
 
 /** Пункт меню и страницы, при которых он подсвечен (вложенные разделы). */
 const NAV: { id: Page; label: string; ico: string; also?: Page[] }[] = [
@@ -32,8 +33,8 @@ const NAV: { id: Page; label: string; ico: string; also?: Page[] }[] = [
   { id: 'analytics', label: 'Аналитика', ico: '◫' }
 ]
 /** Настраивается один раз — ниже, под подписью. */
-const SETUP: { id: Page; label: string; ico: string }[] = [
-  { id: 'overlays', label: 'Оверлеи', ico: '▣' },
+const SETUP: { id: Page; label: string; ico: string; also?: Page[] }[] = [
+  { id: 'overlays', label: 'Оверлеи', ico: '▣', also: ['chatstyle'] },
   { id: 'connections', label: 'Подключения', ico: '⏚' },
   { id: 'settings', label: 'Настройки', ico: '⚙' }
 ]
@@ -84,7 +85,7 @@ export function App() {
           ))}
           <div className="side-sep">Настройка</div>
           {SETUP.map((n) => (
-            <button key={n.id} className={`nav ${page === n.id ? 'on' : ''}`} onClick={() => go(n.id)}>
+            <button key={n.id} className={`nav ${page === n.id || n.also?.includes(page) ? 'on' : ''}`} onClick={() => go(n.id)}>
               <span className="ico">{n.ico}</span>
               {n.label}
             </button>
@@ -135,7 +136,8 @@ export function App() {
           {page === 'chat' && <Chat snap={snap} />}
           {page === 'connections' && <Connections key={connSel ?? ""} snap={snap} initial={connSel} />}
           {page === 'events' && <Events snap={snap} />}
-          {page === 'overlays' && <Overlays snap={snap} />}
+          {page === 'overlays' && <Overlays snap={snap} go={go} />}
+          {page === 'chatstyle' && <ChatStyle snap={snap} go={go} />}
           {page === 'settings' && <Settings snap={snap} />}
           {(page === 'alerts' || page === 'rules') && <SubTabs tabs={ALERT_TABS} page={page} go={go} snap={snap} now={now} />}
           {page === 'alerts' && <Alerts snap={snap} />}

@@ -1,5 +1,6 @@
 import type { Store } from './db'
 import { DOCK_PRESETS, sanitizeBlocks, type DockBlock } from './dock'
+import { lookDefaults, sanitizeLook, textDefaults, type ChatLook } from './chatstyle'
 
 /**
  * Все пользовательские настройки Crossember. Ничего не зашито под конкретного стримера:
@@ -19,6 +20,8 @@ export interface ChatOverlaySettings {
   showPlatform: boolean
   /** Показывать служебные строки «площадка отключилась / подключилась». */
   showStatus: boolean
+  /** Оформление: анимации, подложка, состав строки, события, шрифты (см. chatstyle.ts). */
+  look: ChatLook
 }
 
 /** Чат поверх игры: прозрачное окно поверх всех окон, клики проходят насквозь. */
@@ -217,7 +220,8 @@ const chatDefaults = (horizontal: boolean): ChatOverlaySettings => ({
   hideAfterSec: horizontal ? 30 : 0,
   showBadges: true,
   showPlatform: true,
-  showStatus: false
+  showStatus: false,
+  look: lookDefaults(horizontal ? { animIn: 'slide', gap: 10 } : {})
 })
 
 const rule = (kicker: string, title: string, sound: string, extra: Partial<AlertRule> = {}): AlertRule => ({
@@ -270,7 +274,7 @@ export const DEFAULTS: AppSettings = {
     goal: { theme: 'general', fontSize: 24, showStages: true, showLast: true, showTop: false, topCount: 3, showTimer: true, celebrate: true },
     giveaway: { theme: 'general', fontSize: 26, revealSec: 6, hideAfterSec: 30 }
   },
-  float: { ...chatDefaults(false), fontSize: 18, maxMessages: 12, hideAfterSec: 45, showStatus: true, enabled: false, bgOpacity: 55, bounds: null },
+  float: { ...chatDefaults(false), fontSize: 18, maxMessages: 12, hideAfterSec: 45, showStatus: true, enabled: false, bgOpacity: 55, bounds: null, look: lookDefaults({ gap: 6, radius: 10, text: textDefaults({ shadow: 6 }) }) },
   auction: { pointsReward: '', pointsPerRub: 100, autoLotMin: 300, extend: true, extendBelowSec: 60, extendAddSec: 30, defaultMin: 10 },
   wheel: { mode: 'normal', weighting: 'weight', durationSec: 8 },
   giveaway: {
@@ -307,7 +311,8 @@ function chat(v: unknown, d: ChatOverlaySettings): ChatOverlaySettings {
     hideAfterSec: int(o.hideAfterSec, d.hideAfterSec, 0, 3600),
     showBadges: bool(o.showBadges, d.showBadges),
     showPlatform: bool(o.showPlatform, d.showPlatform),
-    showStatus: bool(o.showStatus, d.showStatus ?? false)
+    showStatus: bool(o.showStatus, d.showStatus ?? false),
+    look: sanitizeLook(o.look, d.look ?? lookDefaults())
   }
 }
 

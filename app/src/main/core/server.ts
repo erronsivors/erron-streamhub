@@ -20,6 +20,7 @@ import type { Wheel } from './wheel'
 import type { Fundraiser } from './goal'
 import type { Giveaway } from './giveaway'
 import { dockView, parseAction, runAction, type DockActionTable } from './dock'
+import { chatCss, eventView, sampleChat } from './chatstyle'
 
 /** Оверлеи для OBS. id = имя файла в resources/overlays, key = ключ настроек. */
 const OVERLAYS = [
@@ -77,6 +78,9 @@ const SECURITY_HEADERS = {
   'X-Frame-Options': 'DENY'
 }
 
+/** Оверлеи-чаты: им в hello нужны недавние события и оформление. */
+const CHAT_OVERLAYS = new Set(['chat', 'chat-h', 'float'])
+
 const PAGE_CSP = `default-src 'none'; style-src 'self' 'unsafe-inline'; script-src 'self'; font-src 'self'; img-src 'self' data:; media-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'`
 
 const newKey = (): string => randomBytes(24).toString('base64url')
@@ -112,6 +116,8 @@ export interface OverlayExtras {
   wheel: Wheel
   goal: Fundraiser
   giveaway: Giveaway
+  /** Свои аккаунты (каналы, бот) — для выделения обращений к стримеру в чате. */
+  own?: () => string[]
 }
 
 export interface RemoteActions {
@@ -166,7 +172,7 @@ export class OverlayServer {
     this.overlayKey = store.get('server.overlayKey', '') || this.rotate('overlay')
     this.remoteKey = store.get('server.remoteKey', '') || this.rotate('remote')
     this.dockKey = store.get('server.dockKey', '') || this.rotate('dock')
-    hub.on('event', (e: HubEvent) => this.broadcast({ kind: 'event', event: e }))
+    hub.on('event', (e: HubEvent) => this.broadcast({ kind: 'event', event: e, view: eventView(e) }))
     hub.on('delete', (d: unknown) => this.broadcast({ kind: 'delete', ...(d as object) }))
     hub.on('pinned', (m: HubEvent | null) => this.broadcast({ kind: 'pinned', event: m }))
     // Алерты идут только в оверлеи (local), пульту второго ПК они не нужны.
@@ -206,10 +212,39 @@ export class OverlayServer {
     return k
   }
 
+  /** Оформление чатов для OBS: готовый CSS (тот же, что в предпросмотре) и свои ники для выделения обращений. */
+  private chatStyle(): { css: Record<string, string>; own: string[] } {
+    const s = this.settings.get()
+    const o = s.overlays
+    return {
+      css: {
+        chat: chatCss(o.chat.look, o.chat.fontSize, 'body', 'v'),
+        chatH: chatCss(o.chatH.look, o.chatH.fontSize, 'body', 'h'),
+        float: chatCss({ ...s.float.look, opacity: s.float.bgOpacity }, s.float.fontSize, 'body', 'f')
+      },
+      own: (this.extras.own?.() ?? []).slice(0, 10)
+    }
+  }
+
+  /** «Тест в OBS»: короткий поток выдуманных сообщений и событий — только в чаты, мимо алертов, правил и базы. */
+  testChat(): void {
+    if (this.chatTestTimer) return
+    const own = this.extras.own?.()[0] ?? 'streamer'
+    let i = 0
+    const tick = (): void => {
+      const e = sampleChat(Math.floor(Math.random() * 1000) + i, own)
+      this.broadcast({ kind: 'chattest', event: e, view: eventView(e) }, 'local')
+      if (++i < 12) this.chatTestTimer = setTimeout(tick, 700)
+      else this.chatTestTimer = null
+    }
+    tick()
+  }
+  private chatTestTimer: NodeJS.Timeout | null = null
+
   /** Сообщить оверлеям о новых настройках (тема, размер шрифта…). */
   pushConfig(): void {
     const s = this.settings.get()
-    this.broadcast({ kind: 'config', overlays: { ...s.overlays, float: s.float }, dockBlocks: s.dock.blocks, lanControl: s.lan.control })
+    this.broadcast({ kind: 'config', overlays: { ...s.overlays, float: s.float }, chatStyle: this.chatStyle(), dockBlocks: s.dock.blocks, lanControl: s.lan.control })
     this.pushStats()
     this.pushDock()
   }
@@ -280,7 +315,8 @@ export class OverlayServer {
       role: kind === 'lan' ? 'remote' : kind === 'dock' ? 'dock' : 'overlay',
       overlays: { ...s.overlays, float: s.float },
       chat: this.hub.recentChat().slice(0, 50),
-      events: isDock ? this.hub.recent().slice(0, 30) : [],
+      events: isDock ? this.hub.recent().slice(0, 30) : CHAT_OVERLAYS.has(ov) ? this.hub.recent().slice(0, 30).map((e) => ({ ...e, view: eventView(e) })) : [],
+      ...(CHAT_OVERLAYS.has(ov) ? { chatStyle: this.chatStyle() } : {}),
       pinned: this.hub.pinned,
       ...(isDock ? { dockBlocks: s.dock.blocks, lanControl: s.lan.control } : {}),
       ...(kind === 'dock' || (kind === 'lan' && s.lan.control) ? { dock: this.dockData() } : {}),
