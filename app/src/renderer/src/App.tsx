@@ -14,28 +14,30 @@ import { Wheel } from './pages/Wheel'
 import { Goal } from './pages/Goal'
 import { Giveaway } from './pages/Giveaway'
 import { Analytics } from './pages/Analytics'
+import { ALERT_TABS, INTERACTIVE, InteractiveHub, SubTabs } from './pages/Interactive'
 import { Feedback } from './pages/Feedback'
 import { Wizard } from './pages/Wizard'
 import { ModeContext } from './components'
 import { useNow, fmtDuration } from './ui'
 
-export type Page = 'home' | 'chat' | 'events' | 'alerts' | 'rules' | 'auction' | 'wheel' | 'goal' | 'giveaway' | 'analytics' | 'overlays' | 'connections' | 'settings' | 'feedback'
+export type Page = 'home' | 'chat' | 'events' | 'alerts' | 'rules' | 'interactive' | 'auction' | 'wheel' | 'goal' | 'giveaway' | 'analytics' | 'overlays' | 'connections' | 'settings' | 'feedback'
 
-const NAV: { id: Page; label: string; ico: string; soon?: boolean }[] = [
+/** Пункт меню и страницы, при которых он подсвечен (вложенные разделы). */
+const NAV: { id: Page; label: string; ico: string; also?: Page[] }[] = [
   { id: 'home', label: 'Главная', ico: '⌂' },
   { id: 'chat', label: 'Мультичат', ico: '💬' },
   { id: 'events', label: 'События', ico: '⚡' },
-  { id: 'alerts', label: 'Алерты', ico: '✦' },
-  { id: 'rules', label: 'Правила', ico: '⇄' },
-  { id: 'auction', label: 'Аукцион', ico: '◈' },
-  { id: 'wheel', label: 'Колесо', ico: '◎' },
-  { id: 'goal', label: 'Сбор средств', ico: '◔' },
-  { id: 'giveaway', label: 'Розыгрыш', ico: '❖' },
-  { id: 'analytics', label: 'Аналитика', ico: '◫' },
+  { id: 'alerts', label: 'Алерты и правила', ico: '✦', also: ['rules'] },
+  { id: 'interactive', label: 'Интерактив', ico: '◈', also: ['auction', 'wheel', 'goal', 'giveaway'] },
+  { id: 'analytics', label: 'Аналитика', ico: '◫' }
+]
+/** Настраивается один раз — ниже, под подписью. */
+const SETUP: { id: Page; label: string; ico: string }[] = [
   { id: 'overlays', label: 'Оверлеи', ico: '▣' },
   { id: 'connections', label: 'Подключения', ico: '⏚' },
   { id: 'settings', label: 'Настройки', ico: '⚙' }
 ]
+const TOOL_PAGES = INTERACTIVE.map((t) => t.id)
 
 const LATER: string[] = []
 
@@ -74,11 +76,17 @@ export function App() {
             </div>
           </div>
           {NAV.map((n) => (
+            <button key={n.id} className={`nav ${page === n.id || n.also?.includes(page) ? 'on' : ''}`} onClick={() => go(n.id)}>
+              <span className="ico">{n.ico}</span>
+              {n.label}
+              {n.id === 'interactive' && pendingBets > 0 && <span className="nav-cnt" title="Ставки аукциона ждут решения">{pendingBets}</span>}
+            </button>
+          ))}
+          <div className="side-sep">Настройка</div>
+          {SETUP.map((n) => (
             <button key={n.id} className={`nav ${page === n.id ? 'on' : ''}`} onClick={() => go(n.id)}>
               <span className="ico">{n.ico}</span>
               {n.label}
-              {n.soon && <span className="soon">скоро</span>}
-              {n.id === 'auction' && pendingBets > 0 && <span className="nav-cnt" title="Ставки ждут решения">{pendingBets}</span>}
             </button>
           ))}
           {LATER.length > 0 && <div className="side-sep">Дальше по плану</div>}
@@ -129,8 +137,11 @@ export function App() {
           {page === 'events' && <Events snap={snap} />}
           {page === 'overlays' && <Overlays snap={snap} />}
           {page === 'settings' && <Settings snap={snap} />}
+          {(page === 'alerts' || page === 'rules') && <SubTabs tabs={ALERT_TABS} page={page} go={go} snap={snap} now={now} />}
           {page === 'alerts' && <Alerts snap={snap} />}
           {page === 'rules' && <Rules snap={snap} />}
+          {page === 'interactive' && <InteractiveHub snap={snap} go={go} now={now} />}
+          {TOOL_PAGES.includes(page) && <SubTabs tabs={INTERACTIVE} page={page} go={go} back={{ label: 'Интерактив', page: 'interactive' }} snap={snap} now={now} />}
           {page === 'auction' && <Auction snap={snap} go={go} />}
           {page === 'wheel' && <Wheel snap={snap} />}
           {page === 'goal' && <Goal snap={snap} />}

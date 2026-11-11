@@ -469,3 +469,26 @@ select.input { cursor: pointer; }
 .an-set textarea.input { resize: vertical; font: inherit; line-height: 1.4; }
 .an-set .field { margin: 6px 0 4px; }
 .an-set .numrow .input { width: 90px; }
+
+/* ---------- Разделы с вкладками: «Интерактив», «Алерты и правила» ---------- */
+.subnav { display: flex; align-items: flex-end; gap: 18px; margin-top: 22px; border-bottom: 1px solid var(--line); }
+.subnav-back { border: 0; background: none; color: var(--muted); font: 600 13px var(--f-text); padding: 10px 0; cursor: pointer; white-space: nowrap; }
+.subnav-back:hover { color: var(--ink); }
+.subtabs { display: flex; flex-wrap: wrap; gap: 2px; }
+.subtabs button { display: inline-flex; align-items: center; gap: 8px; border: 0; background: none; color: var(--muted); font: 700 14px var(--f-text); padding: 10px 14px; cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+.subtabs button:hover { color: var(--ink); }
+.subtabs button.on { color: #fff; border-bottom-color: var(--light); }
+.subtabs .nav-cnt, .ix-tile .nav-cnt { min-width: 20px; padding: 1px 6px; border-radius: 10px; background: var(--fire); color: #fff; font: 700 11px var(--f-mono); text-align: center; }
+.subnav + .head { margin-top: 20px; }
+.ix-tiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; max-width: 1100px; }
+.ix-tile { display: flex; flex-direction: column; align-items: stretch; text-align: left; background: var(--coal); border: 1px solid var(--line); border-radius: 18px; padding: 20px 22px; color: inherit; font: inherit; cursor: pointer; min-width: 0; transition: border-color .15s, transform .15s; }
+.ix-tile:hover { border-color: var(--muted-2); transform: translateY(-1px); }
+.ix-tile h3 { margin: 0 0 6px; font: 700 17px var(--f-display); display: flex; align-items: center; gap: 10px; }
+.ix-tile h3 .nav-cnt { margin-left: auto; }
+.ix-ico { color: var(--light); width: 20px; text-align: center; }
+.ix-tile p { margin: 0 0 16px; color: var(--muted); font-size: 13px; line-height: 1.45; }
+.ix-status { display: flex; align-items: center; gap: 10px; min-width: 0; margin-top: auto; }
+.ix-st { flex: none; max-width: 70%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 5px 10px; border-radius: 8px; border: 1px solid var(--line-2); font: 600 12px var(--f-mono); color: var(--ink-2); }
+.ix-st.live { color: var(--light); border-color: #ffb27a55; }
+.ix-bar { height: 6px; border-radius: 3px; background: var(--coal-2); margin-top: 12px; overflow: hidden; }
+.ix-bar i { display: block; height: 100%; border-radius: 3px; background: var(--light); }
