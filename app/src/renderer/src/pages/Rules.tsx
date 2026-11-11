@@ -1,6 +1,6 @@
 import { useState, type ReactNode, type KeyboardEvent } from 'react'
 import type { HubSnapshot, Platform } from '../../../main/core/types'
-import type { Rule, RuleAction, TriggerType } from '../../../main/core/rules'
+import type { Rule, RuleAction, TriggerType, TtsWhen } from '../../../main/core/rules'
 import type { ObsAction } from '../../../main/core/templates'
 import { Hint, Toggle, errText } from '../components'
 import { PlatIcon, fmtTime } from '../ui'
@@ -24,6 +24,12 @@ const ACTIONS: { type: RuleAction['type']; ico: string; title: string; desc: str
   { type: 'tts', ico: '🗣', title: 'Озвучить', desc: 'Прочитать ник, сумму и сообщение' },
   { type: 'sound', ico: '♪', title: 'Звук', desc: 'Встроенный или свой файл' },
   { type: 'obs', ico: '◧', title: 'Действие в OBS', desc: 'Сцена, источник, фильтр, текст' }
+]
+const TTS_WHEN: { id: TtsWhen; label: string; short: string; hint: string }[] = [
+  { id: 'with', label: 'Вместе с алертом', short: '', hint: 'Голос начинает почти сразу, пока алерт появляется.' },
+  { id: 'afterIn', label: 'Когда алерт появится', short: 'после появления', hint: 'Сначала проходит анимация появления, потом голос.' },
+  { id: 'delay', label: 'Через несколько секунд', short: 'с задержкой', hint: 'Своя пауза от начала алерта.' },
+  { id: 'after', label: 'После алерта', short: 'после алерта', hint: 'Алерт отыгрывает полностью, озвучка звучит следом.' }
 ]
 const RESULT: Record<string, string> = { done: 'выполнено', dry: 'проверка', cooldown: 'кулдаун', error: 'ошибка', test: 'тест' }
 const AMOUNT_TYPES: TriggerType[] = ['donation', 'bits', 'raid', 'gift', 'sub']
@@ -81,7 +87,7 @@ function HotkeyInput({ value, onChange }: { value: string; onChange: (v: string)
 
 function newAction(type: RuleAction['type'], snap: HubSnapshot): RuleAction {
   if (type === 'alert') return { type, templateId: snap.templates[0]?.id ?? '' }
-  if (type === 'tts') return { type, text: '{user} — {amount}. {message}', voice: '', rate: 0, volume: 100 }
+  if (type === 'tts') return { type, text: '{user} — {amount}. {message}', voice: '', rate: 0, volume: 100, when: 'with', delaySec: 2 }
   if (type === 'sound') return { type, sound: 'coin', volume: 80 }
   const obs: ObsAction = { op: 'source', scene: '', source: '', filter: '', mode: 'show', media: 'restart', text: '', revertSec: 10 }
   return { type, obs }
@@ -92,7 +98,10 @@ const num = (n: number): string => n.toLocaleString('ru-RU')
 
 function actionPill(a: RuleAction, snap: HubSnapshot): { ico: string; text: string } {
   if (a.type === 'alert') return { ico: '✦', text: `Алерт «${snap.templates.find((t) => t.id === a.templateId)?.name ?? 'не выбран'}»` }
-  if (a.type === 'tts') return { ico: '🗣', text: 'Озвучка' }
+  if (a.type === 'tts') {
+    const w = TTS_WHEN.find((x) => x.id === a.when)
+    return { ico: '🗣', text: a.when === 'delay' ? `Озвучка через ${a.delaySec} с` : w?.short ? `Озвучка ${w.short}` : 'Озвучка' }
+  }
   if (a.type === 'sound') return { ico: '♪', text: 'Звук' }
   const o = a.obs
   const what = o.op === 'scene' ? `сцена «${o.scene || '?'}»` : o.op === 'filter' ? `фильтр «${o.filter || '?'}»` : o.op === 'text' ? `текст «${o.source || '?'}»` : `«${o.source || '?'}»`
@@ -341,6 +350,14 @@ function RuleEditor({ rule, snap, onClose }: { rule: Rule; snap: HubSnapshot; on
                     <label>Что читать — {'{user}'} ник, {'{amount}'} сумма, {'{message}'} сообщение</label>
                     <input className="input" value={a.text} maxLength={300} onChange={(e) => setA(i, { ...a, text: e.target.value })} />
                   </div>
+                  <div className="inline-cond">
+                    <span>Когда читать</span>
+                    <select className="input" style={{ width: 'auto' }} value={a.when} onChange={(e) => setA(i, { ...a, when: e.target.value as TtsWhen })}>
+                      {TTS_WHEN.map((w) => <option key={w.id} value={w.id}>{w.label}</option>)}
+                    </select>
+                    {a.when === 'delay' && <><NumIn width={80} max={60} value={a.delaySec} onChange={(n) => setA(i, { ...a, delaySec: n })} /><span>сек от начала</span></>}
+                    <span className="muted small">{TTS_WHEN.find((w) => w.id === a.when)?.hint}</span>
+                  </div>
                   <div className="action-grid">
                     <div className="field"><label>Голос</label><VoiceSelect allowDefault value={a.voice} onChange={(v) => setA(i, { ...a, voice: v })} /></div>
                     <div className="field"><label>Скорость</label><NumIn min={-10} max={10} value={a.rate} onChange={(n) => setA(i, { ...a, rate: n })} /></div>
@@ -393,7 +410,7 @@ function RuleEditor({ rule, snap, onClose }: { rule: Rule; snap: HubSnapshot; on
       </details>
 
       {r.actions.some((a) => a.type === 'tts' || a.type === 'sound') && (
-        <p className="small muted">Озвучка и звук играют вместе с первым алертом этого события, а если алерта нет — сами по себе, в той же очереди.</p>
+        <p className="small muted">Озвучка и звук играют вместе с первым алертом этого события (озвучка — в выбранный момент; алерт ждёт, пока голос договорит), а если алерта нет — сами по себе, в той же очереди.</p>
       )}
       {err && <p className="small" style={{ color: '#ff7a84' }}>{err}</p>}
       <div className="btnrow" style={{ marginTop: 14 }}>

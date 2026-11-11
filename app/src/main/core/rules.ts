@@ -25,6 +25,13 @@ const SERVICE_USER: Record<ServiceTrigger, string> = { stream_start: 'Эфир �
 export const HOTKEY_RE = /^(?:(?:Ctrl|Alt|Shift)\+){1,3}(?:[A-Z0-9]|F(?:[1-9]|1\d|2[0-4])|num[0-9])$|^F(?:[1-9]|1\d|2[0-4])$/
 const PLATFORMS: Platform[] = ['twitch', 'youtube', 'vk', 'kick', 'goodgame', 'donationalerts', 'donatepay', 'donatex', 'boosty', 'hub']
 
+/**
+ * Когда читать озвучку из правила: with — вместе с алертом (через 0,6 с); afterIn — когда закончится анимация появления;
+ * delay — через delaySec секунд от начала алерта; after — после алерта, отдельно, следом в той же очереди.
+ */
+export const TTS_WHEN = ['with', 'afterIn', 'delay', 'after'] as const
+export type TtsWhen = (typeof TTS_WHEN)[number]
+
 export interface RuleFilter {
   /** Сумма от (₽ для донатов, биты, зрители рейда…); 0 — не важно. */
   minAmount: number
@@ -40,7 +47,7 @@ export interface RuleFilter {
 
 export type RuleAction =
   | { type: 'alert'; templateId: string }
-  | { type: 'tts'; text: string; voice: string; rate: number; volume: number }
+  | { type: 'tts'; text: string; voice: string; rate: number; volume: number; when: TtsWhen; delaySec: number }
   | { type: 'sound'; sound: string; volume: number }
   | { type: 'obs'; obs: ObsAction }
 
@@ -91,6 +98,10 @@ export interface RulePlan {
   templates: AlertTemplate[]
   /** Озвучка и звуки: прикрепляются к первому алерту события или играют отдельно. */
   extras: Layer[]
+  /** Озвучка «после появления»: время начала считается по анимациям первого алерта. */
+  afterIn: Layer[]
+  /** Озвучка «после алерта»: отдельным элементом очереди следом за алертами события. */
+  after: Layer[]
   obs: ObsAction[]
 }
 
@@ -108,7 +119,10 @@ function sanitizeAction(v: unknown): RuleAction | null {
   const o = obj(v)
   switch (o.type) {
     case 'alert': return typeof o.templateId === 'string' && /^[\w-]{1,40}$/.test(o.templateId) ? { type: 'alert', templateId: o.templateId } : null
-    case 'tts': return { type: 'tts', text: str(o.text, '{user} — {amount}. {message}', 300), voice: str(o.voice, '', 100), rate: num(o.rate, 0, -10, 10), volume: num(o.volume, 100, 0, 100) }
+    case 'tts': return {
+      type: 'tts', text: str(o.text, '{user} — {amount}. {message}', 300), voice: str(o.voice, '', 100), rate: num(o.rate, 0, -10, 10), volume: num(o.volume, 100, 0, 100),
+      when: oneOf(o.when, TTS_WHEN, 'with'), delaySec: num(o.delaySec, 2, 0, 60, false)
+    }
     case 'sound': return { type: 'sound', sound: soundId(o.sound, 'coin'), volume: num(o.volume, 80, 0, 100) }
     case 'obs': return { type: 'obs', obs: sanitizeObs(o.obs) }
     default: return null
@@ -364,7 +378,10 @@ export class RuleEngine extends EventEmitter {
         const t = this.templates.get(a.templateId)
         if (t) plan.templates.push(t)
       } else if (a.type === 'tts') {
-        plan.extras.push(newLayer('tts', { text: a.text, voice: a.voice, rate: a.rate, volume: a.volume, start: 600 }))
+        const l = newLayer('tts', { text: a.text, voice: a.voice, rate: a.rate, volume: a.volume, start: a.when === 'delay' ? Math.round(a.delaySec * 1000) : a.when === 'with' ? 600 : 0 })
+        if (a.when === 'afterIn') plan.afterIn.push(l)
+        else if (a.when === 'after') plan.after.push(l)
+        else plan.extras.push(l)
       } else if (a.type === 'sound') {
         plan.extras.push(newLayer('sound', { sound: a.sound, volume: a.volume }))
       } else plan.obs.push(a.obs)
@@ -372,7 +389,7 @@ export class RuleEngine extends EventEmitter {
   }
 
   private execute(plan: RulePlan, e: HubEvent, force: boolean): void {
-    if (plan.templates.length || plan.extras.length) this.runner.play(plan, e, force)
+    if (plan.templates.length || plan.extras.length || plan.afterIn.length || plan.after.length) this.runner.play(plan, e, force)
     for (const o of plan.obs) {
       this.runner.obs(o, e).catch((err) => this.hub.log('obs', 'warn', `Правило не выполнило действие OBS: ${(err as Error).message}`))
     }
@@ -386,7 +403,7 @@ export class RuleEngine extends EventEmitter {
   /** Пройти правила сверху вниз: pick — подходит ли правило к этому поводу. */
   private process(e: HubEvent, pick: (r: Rule) => boolean, type: RuleLogEntry['type']): void {
     if (!this.enabled) return
-    const plan: RulePlan = { templates: [], extras: [], obs: [] }
+    const plan = emptyPlan()
     const now = Date.now()
     let any = false
     for (const r of this.rules) {
@@ -417,7 +434,7 @@ export class RuleEngine extends EventEmitter {
   test(ruleId: string, sample: HubEvent): boolean {
     const r = this.rules.find((x) => x.id === ruleId)
     if (!r) return false
-    const plan: RulePlan = { templates: [], extras: [], obs: [] }
+    const plan = emptyPlan()
     this.collect(r, plan)
     this.execute(plan, sample, true)
     this.addLog(r, sample, 'test', this.describe(r))
@@ -431,7 +448,7 @@ export class RuleEngine extends EventEmitter {
     const r = withAlert.find((x) => x.enabled && matches(x, { ...e, test: e.test })) ??
       withAlert.find((x) => (x.types as string[]).includes(e.type))
     if (!r) return false
-    const plan: RulePlan = { templates: [], extras: [], obs: [] }
+    const plan = emptyPlan()
     for (const a of r.actions) if (a.type === 'alert') { const t = this.templates.get(a.templateId); if (t) plan.templates.push(t) }
     if (!plan.templates.length) return false
     this.runner.play(plan, e, true)
@@ -440,3 +457,5 @@ export class RuleEngine extends EventEmitter {
 }
 
 export const newRuleId = (): string => randomUUID()
+
+const emptyPlan = (): RulePlan => ({ templates: [], extras: [], afterIn: [], after: [], obs: [] })

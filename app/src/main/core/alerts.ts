@@ -160,11 +160,22 @@ export class AlertEngine extends EventEmitter {
   /** Исполнитель правил: первый шаблон получает озвучку и звуки правил, без шаблона они играют отдельно. */
   play(plan: RulePlan, e: HubEvent, force: boolean): void {
     if (!force && !this.settings.get().alerts.enabled) return
-    if (!plan.templates.length) {
-      this.enqueue({ id: 'extras', name: 'Озвучка', theme: 'auto', durationMs: 1500, extendByMessage: false, layers: [] }, e, force, plan.extras)
-      return
+    const solo = (layers: Layer[]): void => {
+      if (layers.length) this.enqueue({ id: 'extras', name: 'Озвучка', theme: 'auto', durationMs: 1500, extendByMessage: false, layers: [] }, e, force, layers)
     }
-    plan.templates.forEach((t, i) => this.enqueue(t, e, force, i === 0 ? plan.extras : []))
+    if (!plan.templates.length) {
+      solo([...plan.extras, ...plan.afterIn])
+    } else {
+      // «После появления»: когда закончится самая поздняя анимация появления в первом алерте (+0,2 с паузы).
+      const first = plan.templates[0]
+      const shown = Math.max(0, ...first.layers
+        .filter((l) => !l.hidden && (l.type === 'card' || l.type === 'text' || l.type === 'image' || l.type === 'video'))
+        .map((l) => l.start + (l.animIn !== 'none' ? l.animInMs : 0)))
+      const afterIn = plan.afterIn.map((l) => ({ ...l, start: shown + 200 }))
+      plan.templates.forEach((t, i) => this.enqueue(t, e, force, i === 0 ? [...plan.extras, ...afterIn] : []))
+    }
+    // «После алерта»: отдельно, следом за алертами этого события.
+    solo(plan.after)
   }
 
   /** Собрать алерт из шаблона и поставить в очередь. */
