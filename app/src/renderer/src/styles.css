@@ -360,3 +360,30 @@ select.input { cursor: pointer; }
 .goal-top-row .grow { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .goal-top-row b { font: 700 14px var(--f-mono); white-space: nowrap; }
 .goal-guser { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ---------- Розыгрыш ---------- */
+.gw-control { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 28px; align-items: center; margin-bottom: 18px; }
+.gw-clock-box { min-width: 170px; }
+.gw-prize .input { width: 100%; }
+.gw-num { display: inline-flex; align-items: center; gap: 6px; }
+.gw-num .input { width: 64px; padding: 9px 10px; }
+.gw-grid { grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr); align-items: start; }
+@media (max-width: 1150px) { .gw-grid { grid-template-columns: minmax(0, 1fr); } }
+.gw-winners { margin-bottom: 18px; border-color: #ffb27a55; }
+.gw-rolling { display: flex; align-items: baseline; gap: 14px; padding: 6px 0 4px; }
+.gw-rolling b { font: 800 26px/1.2 var(--f-display); color: var(--muted); }
+.gw-win { padding: 12px 0; border-bottom: 1px solid var(--line); }
+.gw-win:last-of-type { border-bottom: none; }
+.gw-win.skipped { opacity: .45; }
+.gw-win.skipped .gw-wname { text-decoration: line-through; }
+.gw-win-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.gw-wname { font: 800 24px/1.2 var(--f-display); word-break: break-word; }
+.gw-win-head .btn { margin-left: auto; align-self: center; }
+.gw-wait { font: 600 13px var(--f-mono); color: var(--warn); }
+.gw-wait.late { color: var(--fire); }
+.gw-msgs { margin-top: 8px; padding: 10px 12px; border-radius: 10px; background: var(--coal-2); display: flex; flex-direction: column; gap: 4px; font-size: 14px; user-select: text; }
+.gw-entries { max-height: 560px; overflow-y: auto; }
+.gw-entry { display: flex; align-items: center; gap: 12px; padding: 7px 0; border-bottom: 1px solid var(--line); min-width: 0; }
+.gw-entry:last-child { border-bottom: none; }
+.gw-entry .grow { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.gw-tk { font: 700 14px var(--f-mono); min-width: 24px; text-align: right; }

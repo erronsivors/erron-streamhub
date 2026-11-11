@@ -131,11 +131,34 @@ export interface AppSettings {
     wheel: { theme: Theme; hideAfterSec: number }
     /** Сбор средств: что показывать под полоской. */
     goal: GoalOverlaySettings
+    /** Розыгрыш: длительность прокрутки ников, через сколько скрыть итог. */
+    giveaway: { theme: Theme; fontSize: number; revealSec: number; hideAfterSec: number }
   }
   float: FloatChatSettings
   auction: AuctionSettings
   /** Колесо: режим, как считать сектора, длительность прокрутки. */
   wheel: { mode: 'normal' | 'elim'; weighting: 'weight' | 'equal'; durationSec: number }
+  giveaway: GiveawaySettings
+}
+
+/** Розыгрыш (участники и победители хранятся отдельно, в giveaway.v1). */
+export interface GiveawaySettings {
+  /** Слово для участия: «!участвую». */
+  keyword: string
+  /** Каждые N ₽ доната = +1 билет; 0 — донаты билетов не дают. */
+  rubPerTicket: number
+  /** Больше билетов у одного зрителя не бывает. */
+  maxTickets: number
+  /** Таймер приёма по умолчанию, мин (0 — без таймера). */
+  defaultMin: number
+  /** Сколько победителей выбирать. */
+  winners: number
+  /** Сколько секунд победитель может ответить в чате. */
+  answerSec: number
+  /** Писать в чат о старте и победителях. */
+  announce: boolean
+  startText: string
+  winText: string
 }
 
 /** Оверлей «Сбор средств» (цель и донаты хранятся отдельно, в goal.v1). */
@@ -225,11 +248,16 @@ export const DEFAULTS: AppSettings = {
     counter: { theme: 'general', fontSize: 30, ids: [], layout: 'column' },
     auction: { theme: 'general', fontSize: 24, count: 5, show: 'both', showTimer: true },
     wheel: { theme: 'general', hideAfterSec: 10 },
-    goal: { theme: 'general', fontSize: 24, showStages: true, showLast: true, showTop: false, topCount: 3, showTimer: true, celebrate: true }
+    goal: { theme: 'general', fontSize: 24, showStages: true, showLast: true, showTop: false, topCount: 3, showTimer: true, celebrate: true },
+    giveaway: { theme: 'general', fontSize: 26, revealSec: 6, hideAfterSec: 30 }
   },
   float: { ...chatDefaults(false), fontSize: 18, maxMessages: 12, hideAfterSec: 45, showStatus: true, enabled: false, bgOpacity: 55, bounds: null },
   auction: { pointsReward: '', pointsPerRub: 100, autoLotMin: 300, extend: true, extendBelowSec: 60, extendAddSec: 30, defaultMin: 10 },
-  wheel: { mode: 'normal', weighting: 'weight', durationSec: 8 }
+  wheel: { mode: 'normal', weighting: 'weight', durationSec: 8 },
+  giveaway: {
+    keyword: '!участвую', rubPerTicket: 100, maxTickets: 20, defaultMin: 3, winners: 1, answerSec: 60, announce: true,
+    startText: 'Розыгрыш: {приз}! Пишите {слово} в чат, чтобы участвовать.', winText: 'Победитель розыгрыша «{приз}»: {победители}! Напишите в чат 🎉'
+  }
 }
 
 const theme = (v: unknown, d: Theme): Theme => (v === 'general' || v === 'campfire' ? v : d)
@@ -407,9 +435,29 @@ export function sanitize(input: unknown, base: AppSettings = DEFAULTS): AppSetti
           showLast: bool(o.showLast, b.showLast), showTop: bool(o.showTop, b.showTop), topCount: int(o.topCount, b.topCount, 1, 5),
           showTimer: bool(o.showTimer, b.showTimer), celebrate: bool(o.celebrate, b.celebrate)
         }
+      })(),
+      giveaway: (() => {
+        const o = obj(ov.giveaway)
+        const b = base.overlays.giveaway ?? DEFAULTS.overlays.giveaway
+        return { theme: theme(o.theme, b.theme), fontSize: int(o.fontSize, b.fontSize, 12, 72), revealSec: int(o.revealSec, b.revealSec, 2, 20), hideAfterSec: int(o.hideAfterSec, b.hideAfterSec, 0, 600) }
       })()
     },
     float: float(i.float, base.float ?? DEFAULTS.float),
+    giveaway: (() => {
+      const o = obj(i.giveaway)
+      const b = base.giveaway ?? DEFAULTS.giveaway
+      return {
+        keyword: text(o.keyword, b.keyword, 30).trim() || b.keyword,
+        rubPerTicket: int(o.rubPerTicket, b.rubPerTicket, 0, 1_000_000),
+        maxTickets: int(o.maxTickets, b.maxTickets, 1, 1000),
+        defaultMin: int(o.defaultMin, b.defaultMin, 0, 600),
+        winners: int(o.winners, b.winners, 1, 10),
+        answerSec: int(o.answerSec, b.answerSec, 10, 600),
+        announce: bool(o.announce, b.announce),
+        startText: text(o.startText, b.startText, 300),
+        winText: text(o.winText, b.winText, 300)
+      }
+    })(),
     auction: (() => {
       const o = obj(i.auction)
       const b = base.auction ?? DEFAULTS.auction

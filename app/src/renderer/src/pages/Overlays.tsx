@@ -4,7 +4,7 @@ import type { AppSettings, ChatOverlaySettings, StatsPeriod, Theme } from '../..
 import { Hint, NumberField, ThemePicker, Toggle } from '../components'
 
 type Key = keyof AppSettings['overlays']
-const KEY: Record<string, Key> = { alert: 'alert', chat: 'chat', 'chat-h': 'chatH', pinned: 'pinned', top: 'top', last: 'last', counter: 'counter', auction: 'auction', wheel: 'wheel', goal: 'goal' }
+const KEY: Record<string, Key> = { alert: 'alert', chat: 'chat', 'chat-h': 'chatH', pinned: 'pinned', top: 'top', last: 'last', counter: 'counter', auction: 'auction', wheel: 'wheel', goal: 'goal', giveaway: 'giveaway' }
 const DESC: Record<string, string> = {
   alert: 'Донаты, подписки, рейды, фолловы — по очереди, по центру экрана.',
   chat: 'Колонка чата: новые сообщения снизу.',
@@ -15,7 +15,8 @@ const DESC: Record<string, string> = {
   counter: 'Смерти, победы и другие счётчики из раздела «Правила». Число коротко подпрыгивает, когда меняется.',
   auction: 'Таймер и топ лотов с полосками доли, в конце — победитель. Ники и сообщения зрителей не показываются.',
   wheel: 'Появляется, когда крутите колесо, показывает итог и само прячется. Источник можно держать включённым всегда.',
-  goal: 'Цель с полоской прогресса и этапами, последний донат, топ сбора и срок. Этап или цель достигнуты — короткий праздник.'
+  goal: 'Цель с полоской прогресса и этапами, последний донат, топ сбора и срок. Этап или цель достигнуты — короткий праздник.',
+  giveaway: 'Во время приёма — слово для участия, число участников и таймер. При выборе ники прокручиваются до победителя.'
 }
 
 export function Overlays({ snap }: { snap: HubSnapshot }) {
@@ -71,6 +72,13 @@ function OverlayCard({ o, snap }: { o: OverlayInfo; snap: HubSnapshot }) {
       )}
       {key === 'counter' && <CounterSettings c={cfg as AppSettings['overlays']['counter']} snap={snap} set={set} />}
       {key === 'auction' && <AuctionOverlaySettings c={cfg as AppSettings['overlays']['auction']} set={set} />}
+      {key === 'giveaway' && (
+        <div className="grid g3" style={{ gap: 10 }}>
+          <NumberField label="Шрифт" value={(cfg as AppSettings['overlays']['giveaway']).fontSize} min={12} max={72} suffix="px" onChange={(v) => set({ fontSize: v })} />
+          <NumberField label="Прокрутка" value={(cfg as AppSettings['overlays']['giveaway']).revealSec} min={2} max={20} suffix="сек" onChange={(v) => set({ revealSec: v })} />
+          <NumberField label="Скрыть итог через" value={(cfg as AppSettings['overlays']['giveaway']).hideAfterSec} min={0} max={600} suffix="сек (0 — нет)" onChange={(v) => set({ hideAfterSec: v })} />
+        </div>
+      )}
       {key === 'goal' && <GoalOverlaySettings c={cfg as AppSettings['overlays']['goal']} set={set} />}
       {key === 'wheel' && <NumberField label="Скрыть после итога через" value={(cfg as AppSettings['overlays']['wheel']).hideAfterSec} min={0} max={600} suffix="сек (0 — не скрывать)" onChange={(v) => set({ hideAfterSec: v })} />}
       {key === 'pinned' && (

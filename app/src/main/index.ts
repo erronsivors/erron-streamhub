@@ -19,6 +19,7 @@ import { Counters } from './core/counters'
 import { Auction } from './core/auction'
 import { Wheel } from './core/wheel'
 import { Fundraiser, type GoalReached } from './core/goal'
+import { Giveaway, type GiveawayWinner } from './core/giveaway'
 import { Profiles, type ProfilePart } from './core/profile'
 import { KickAuth } from './core/kickauth'
 import { StreamInfo, INFO_PLATFORMS, type InfoPlatform } from './core/streaminfo'
@@ -64,6 +65,7 @@ let counters: Counters
 let auction: Auction
 let wheel: Wheel
 let goal: Fundraiser
+let giveaway: Giveaway
 let profiles: Profiles
 let kickAuth: KickAuth
 let streamInfo: StreamInfo
@@ -99,6 +101,7 @@ function snapshot(): HubSnapshot {
     auction: auction.state(),
     wheel: wheel.state(),
     goal: goal.state(),
+    giveaway: giveaway.state(),
     alertOverlays: server ? server.openCount('alert') : 0,
     float: { open: floatChat?.isOpen ?? false, editing: floatChat?.isEditing ?? false, hotkey: FLOAT_HOTKEY.replace('CommandOrControl', 'Ctrl') }
   }
@@ -246,6 +249,26 @@ app.whenReady().then(async () => {
   wheel.on('winner', (it: { lotId?: string }) => { if (it.lotId) auction.setWinner(it.lotId) })
   goal = new Fundraiser(store, hub)
   goal.on('change', pushUpdate)
+  giveaway = new Giveaway(store, settings, hub)
+  giveaway.on('change', pushUpdate)
+  // Розыгрыш: объявления в чат на всех площадках, где можно писать.
+  const announce = (tpl: string, vars: Record<string, string>): void => {
+    const cfg = settings.get().giveaway
+    if (!cfg.announce || !tpl.trim()) return
+    const text = tpl.replace(/\{(приз|слово|победители)\}/g, (_, k: string) => vars[k] ?? '').replace(/\s+/g, ' ').trim().slice(0, 450)
+    const targets = chats.states().filter((p) => p.canSend).map((p) => p.id)
+    if (!targets.length) return
+    chats.send(text, targets, 'broadcaster').catch((e: Error) => hub.log('hub', 'warn', `Розыгрыш: не удалось написать в чат — ${e.message}`))
+  }
+  giveaway.on('opened', (prize: string) => {
+    const cfg = settings.get().giveaway
+    announce(cfg.startText, { приз: prize || 'розыгрыш', слово: cfg.keyword, победители: '' })
+  })
+  giveaway.on('drawn', (list: GiveawayWinner[]) => {
+    const cfg = settings.get().giveaway
+    const st = giveaway.state()
+    announce(cfg.winText, { приз: st.prize || 'розыгрыш', слово: cfg.keyword, победители: list.map((w) => w.user).join(', ') })
+  })
   rules = new RuleEngine(hub, store, settings, templates, {
     play: (plan, e, force) => alerts.play(plan, e, force),
     obs: runObs,
@@ -275,7 +298,7 @@ app.whenReady().then(async () => {
   server = new OverlayServer(hub, store, settings, images, resourcesDir, app.getAppPath(), {
     send: (text) => chats.send(text, chats.states().filter((p) => p.canSend).map((p) => p.id), 'broadcaster'),
     pin: (id) => hub.togglePin(id)
-  }, { alerts, stats, sounds, media, tts, counters, auction, wheel, goal })
+  }, { alerts, stats, sounds, media, tts, counters, auction, wheel, goal, giveaway })
   obs.onChange = pushUpdate
   server.onClients = pushUpdate
   floatChat = new FloatChat(settings, hub, () => server.overlayUrl('float'))
@@ -428,6 +451,17 @@ app.whenReady().then(async () => {
   handle('hub:goalAdd', (rub, note) => { goal.addHand(rub, typeof note === 'string' ? str(note, 300) : '') })
   handle('hub:goalToggleGift', (id) => goal.toggleGift(str(id, 100)))
   handle('hub:goalClearArchive', () => goal.clearArchive())
+  // ---------- Розыгрыш ----------
+  handle('hub:gwStart', (prize, min) => giveaway.start(typeof prize === 'string' ? str(prize, 200) : '', min))
+  handle('hub:gwExtend', (min) => giveaway.extend(min))
+  handle('hub:gwClose', () => giveaway.close(false))
+  handle('hub:gwPrize', (prize) => giveaway.setPrize(str(prize, 200)))
+  handle('hub:gwRemove', (key) => giveaway.removeEntry(str(key, 100)))
+  handle('hub:gwFakes', (n) => giveaway.addFakes(n))
+  handle('hub:gwDraw', (n) => giveaway.draw(n))
+  handle('hub:gwReroll', (key) => giveaway.reroll(str(key, 100)))
+  handle('hub:gwReset', () => giveaway.reset())
+  handle('hub:gwClearArchive', () => giveaway.clearArchive())
   // ---------- Шаблоны алертов (конструктор) ----------
   handle('hub:templatePut', (t) => templates.put(t))
   handle('hub:templateRemove', (id) => {
@@ -566,6 +600,7 @@ app.on('before-quit', () => {
   auction?.stop()
   wheel?.stop()
   goal?.stop()
+  giveaway?.stop()
   kickAuth?.cancelLogin()
   floatChat?.close()
   chats.stopAll()

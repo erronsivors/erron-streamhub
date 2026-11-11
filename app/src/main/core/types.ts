@@ -14,6 +14,7 @@ import type { KickAuthState } from './kickauth'
 import type { AuctionState } from './auction'
 import type { WheelState } from './wheel'
 import type { GoalState } from './goal'
+import type { GiveawayState } from './giveaway'
 
 export type Platform = 'twitch' | 'youtube' | 'vk' | 'kick' | 'goodgame' | 'donationalerts' | 'donatepay' | 'donatex' | 'boosty' | 'obs' | 'hub'
 
@@ -148,6 +149,7 @@ export interface HubSnapshot {
   auction: AuctionState
   wheel: WheelState
   goal: GoalState
+  giveaway: GiveawayState
   /** Сколько копий оверлея «Алерты» сейчас открыто (0 — алерты и озвучку некому показать). */
   alertOverlays: number
   float: { open: boolean; editing: boolean; hotkey: string }
