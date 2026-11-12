@@ -164,7 +164,8 @@ export function sanitizeRule(v: unknown): Rule {
 
 /** Сумма события для условий: донаты — в рублях, остальное — как есть. */
 export function eventValue(e: HubEvent): number {
-  if (e.type === 'donation') return e.amountRub ?? (e.currency === 'RUB' || !e.currency ? e.amount : undefined) ?? e.amount ?? 0
+  // Донат в другой валюте без пересчёта в рубли сервисом не считаем рублями (иначе $10 прошли бы как 10 ₽).
+  if (e.type === 'donation') return e.amountRub ?? (e.currency === 'RUB' || !e.currency ? e.amount ?? 0 : 0)
   return e.amount ?? 0
 }
 
@@ -483,13 +484,16 @@ export class RuleEngine extends EventEmitter {
       any = true
       if (this.dryRun) this.addLog(r, e, 'dry', `сработало бы: ${this.describe(r)}`, type)
       else {
+        // Удалить и вставить заново: порядок в Map — от давно сработавших к недавним.
+        this.lastFire.delete(key)
         this.lastFire.set(key, now)
         this.collect(r, plan)
         this.addLog(r, e, 'done', this.describe(r), type)
       }
       if (r.stop) break
     }
-    if (this.lastFire.size > 5000) this.lastFire.clear()
+    // Защита памяти: забываем только самые давние срабатывания, а не все кулдауны разом.
+    if (this.lastFire.size > 5000) for (const k of [...this.lastFire.keys()].slice(0, this.lastFire.size - 4000)) this.lastFire.delete(k)
     if (!this.dryRun) this.execute(plan, e, false)
     if (any) this.emit('change')
   }

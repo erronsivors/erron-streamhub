@@ -213,8 +213,10 @@ export class Wheel extends EventEmitter {
     return this.spinNow
   }
 
-  private finish(): void {
+  /** Итог вращения. quiet — без событий 'winner' (приложение закрывается: итог сохраняем, действия не запускаем). */
+  private finish(quiet = false): void {
     const sp = this.spinNow
+    if (this.timer) clearTimeout(this.timer)
     this.timer = null
     if (!sp) return
     this.spinNow = null
@@ -225,7 +227,7 @@ export class Wheel extends EventEmitter {
       this.result = { kind: 'win', id: sp.targetId, name, ts }
       this.winner = { name, ts }
       this.history.unshift({ ts, name, kind: 'win' })
-      if (item) this.emit('winner', item)
+      if (item && !quiet) this.emit('winner', item)
     } else {
       this.out.push(sp.targetId)
       this.result = { kind: 'out', id: sp.targetId, name, ts }
@@ -234,7 +236,7 @@ export class Wheel extends EventEmitter {
       if (alive.length === 1) {
         this.winner = { name: alive[0].name, ts }
         this.history.unshift({ ts, name: alive[0].name, kind: 'win' })
-        this.emit('winner', alive[0])
+        if (!quiet) this.emit('winner', alive[0])
       }
     }
     if (this.history.length > HISTORY_LIMIT) this.history.length = HISTORY_LIMIT
@@ -242,6 +244,8 @@ export class Wheel extends EventEmitter {
   }
 
   stop(): void {
+    // Закрытие посреди вращения: исход уже выбран — записываем его в историю, а не теряем.
+    if (this.spinNow) this.finish(true)
     if (this.timer) clearTimeout(this.timer)
     this.timer = null
   }

@@ -484,6 +484,8 @@ export class OverlayServer {
       } catch {
         return
       }
+      // Только объект: «null», число или массив от устройства не должны ронять обработчик.
+      if (!m || typeof m !== 'object' || Array.isArray(m)) return
       if (m.kind === 'send' && typeof m.text === 'string') {
         const now = Date.now()
         if (now - lastSend < 500) return

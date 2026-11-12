@@ -295,12 +295,13 @@ export class Analytics extends EventEmitter {
     if (this.flushTimer) { clearTimeout(this.flushTimer); this.flushTimer = null }
     if (!this.pending.size) return
     const list = [...this.pending.values()]
-    this.pending.clear()
     const db = this.store.sql
     const sel = db.prepare('SELECT last_session FROM viewers WHERE platform = ? AND key = ?')
     const ins = db.prepare('INSERT INTO viewers(platform, key, user, messages, streams, first_ts, last_ts, last_session) VALUES(?,?,?,?,1,?,?,?)')
     const upd = db.prepare('UPDATE viewers SET user = ?, messages = messages + ?, last_ts = MAX(last_ts, ?), streams = streams + ?, last_session = ? WHERE platform = ? AND key = ?')
     const c = this.cur
+    // Счётчики эфира меняются в цикле — при сбое транзакции вернём их, чтобы повтор не посчитал дважды.
+    const before = c ? { chatters: { ...c.chatters }, messages: { ...c.messages }, newChatters: c.newChatters } : null
     db.exec('BEGIN')
     try {
       for (const p of list) {
@@ -319,8 +320,12 @@ export class Analytics extends EventEmitter {
       db.exec('COMMIT')
     } catch (err) {
       db.exec('ROLLBACK')
+      if (c && before) Object.assign(c, before)
+      // Очередь не очищена — данные запишутся при следующей попытке.
       throw err
     }
+    // Очищаем только после успешной записи: при сбое накопленное не теряется.
+    this.pending.clear()
     if (c) this.saveStream()
     else this.emit('change')
   }

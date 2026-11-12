@@ -354,6 +354,7 @@ app.whenReady().then(async () => {
   })
   sounds = new SoundLibrary(app.getPath('userData'), store)
   hub.seed(store.recentEvents(100))
+  hub.known = (id) => store.hasEvent(id)
   if (!secrets.available()) hub.log('hub', 'error', 'Шифрование Windows недоступно — токены сохранять нельзя')
 
   for (const ev of ['status', 'delete', 'pinned', 'log']) hub.on(ev, pushUpdate)

@@ -28,7 +28,9 @@ export class ObsConnector {
   private retryDelay = 2000
   private stopped = false
   /** Отложенные возвраты «как было»: ключ — что меняли (сцена, источник, фильтр, текст). */
-  private reverts = new Map<string, { timer: NodeJS.Timeout; restore: () => Promise<unknown> }>()
+  private reverts = new Map<string, { timer: NodeJS.Timeout; restore: () => Promise<unknown>; origin?: string }>()
+  /** Возвраты, чьё время пришло, пока OBS был отключён: выполним сразу после переподключения. */
+  private missed = new Map<string, () => Promise<unknown>>()
   state: ObsState = { connected: false, scene: null, streaming: false, streamStartedAt: null, recording: false, resolution: null, fps: null }
   onChange: () => void = () => undefined
   /** Эфир начался (true) или закончился (false) — по событию OBS, не при подключении к уже идущему эфиру. */
@@ -87,6 +89,7 @@ export class ObsConnector {
     if (this.retryTimer) clearTimeout(this.retryTimer)
     for (const r of this.reverts.values()) clearTimeout(r.timer)
     this.reverts.clear()
+    this.missed.clear()
     await this.obs.disconnect().catch(() => undefined)
   }
 
@@ -121,19 +124,30 @@ export class ObsConnector {
    * Через revertSec вернуть как было. Если это же уже меняли и возврат ещё не случился —
    * исходное состояние берём старое (а не промежуточное), а таймер продлеваем.
    */
-  private scheduleRevert(key: string, sec: number, restore: () => Promise<unknown>): void {
+  private scheduleRevert(key: string, sec: number, restore: () => Promise<unknown>, opts: { replace?: boolean; origin?: string } = {}): void {
     const old = this.reverts.get(key)
     if (old) clearTimeout(old.timer)
+    this.missed.delete(key)
     if (sec <= 0) {
       this.reverts.delete(key)
       return
     }
-    const r = old?.restore ?? restore
+    // replace — новое действие само знает исходное состояние (сцена: «вернуть origin, если сейчас последняя временная»).
+    const r = opts.replace ? restore : old?.restore ?? restore
     const timer = setTimeout(() => {
       this.reverts.delete(key)
-      if (this.state.connected) r().catch((e) => this.hub.log('obs', 'warn', `Не удалось вернуть как было: ${(e as Error).message}`))
+      // OBS отключён — не теряем возврат: выполним, как только связь вернётся.
+      if (!this.state.connected) return void this.missed.set(key, r)
+      r().catch((e) => this.hub.log('obs', 'warn', `Не удалось вернуть как было: ${(e as Error).message}`))
     }, sec * 1000)
-    this.reverts.set(key, { timer, restore: r })
+    this.reverts.set(key, { timer, restore: r, origin: opts.origin ?? old?.origin })
+  }
+
+  /** После переподключения: выполнить возвраты, пропущенные из-за обрыва. */
+  private runMissed(): void {
+    const list = [...this.missed.values()]
+    this.missed.clear()
+    for (const r of list) r().catch((e) => this.hub.log('obs', 'warn', `Не удалось вернуть как было после переподключения: ${(e as Error).message}`))
   }
 
   /** Выполнить действие правила или слоя конструктора. vars — подстановка {user} и т.п. в текст. */
@@ -145,10 +159,13 @@ export class ObsConnector {
         const { currentProgramSceneName: prev } = await this.obs.call('GetCurrentProgramScene')
         if (prev === a.scene && !this.reverts.has('scene')) return
         await this.obs.call('SetCurrentProgramScene', { sceneName: a.scene })
+        // Исходная сцена — та, что была до первой временной смены: A → B → C вернёт A, а не B.
+        const origin = this.reverts.get('scene')?.origin ?? prev
         this.scheduleRevert('scene', a.revertSec, async () => {
           const { currentProgramSceneName: now } = await this.obs.call('GetCurrentProgramScene')
-          if (now === a.scene) await this.obs.call('SetCurrentProgramScene', { sceneName: prev })
-        })
+          // Стример за это время сам переключил сцену — не вмешиваемся.
+          if (now === a.scene) await this.obs.call('SetCurrentProgramScene', { sceneName: origin })
+        }, { replace: true, origin })
         return
       }
       case 'source': {
@@ -226,6 +243,7 @@ export class ObsConnector {
         fps: Math.round((video.fpsNumerator / video.fpsDenominator) * 100) / 100
       })
       this.hub.setStatus('obs', 'ok', `Подключено · obs-websocket ${obsWebSocketVersion}`)
+      this.runMissed()
     } catch (e) {
       // ConnectionClosed сам запланирует повтор; здесь — на случай ошибки до открытия сокета.
       this.scheduleRetry(`Не удалось подключиться: ${(e as Error).message}`)

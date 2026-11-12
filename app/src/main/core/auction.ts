@@ -25,6 +25,8 @@ export interface AuctionLot {
   /** Создан сам из сообщения зрителя — можно отклонить. */
   auto: boolean
   createdAt: number
+  /** Итог ставок этого лота, вытесненных из списка (он хранит последние BET_LIMIT): сумма лота не уменьшается. */
+  carry?: { rub: number; bets: number }
 }
 
 export interface AuctionBet {
@@ -134,7 +136,9 @@ function load(v: unknown): Saved {
     const name = s(l.name, 60)
     const id = s(l.id, 40)
     if (!name || !id) return null
-    return { id, num: Math.max(1, Math.round(Number(l.num) || 1)), name, auto: l.auto === true, createdAt: Number(l.createdAt) || Date.now() }
+    const c = obj(l.carry)
+    const carry = { rub: rub(Math.max(0, Number(c.rub) || 0)), bets: Math.max(0, Math.round(Number(c.bets) || 0)) }
+    return { id, num: Math.max(1, Math.round(Number(l.num) || 1)), name, auto: l.auto === true, createdAt: Number(l.createdAt) || Date.now(), ...(carry.rub > 0 || carry.bets > 0 ? { carry } : {}) }
   }).filter((l): l is AuctionLot => !!l)
   const ids = new Set(lots.map((l) => l.id))
   const bets = (Array.isArray(o.bets) ? o.bets : []).slice(0, BET_LIMIT).map((x): AuctionBet | null => {
@@ -192,6 +196,7 @@ export class Auction extends EventEmitter {
 
   private sums(): Map<string, { rub: number; bets: number }> {
     const m = new Map<string, { rub: number; bets: number }>()
+    for (const l of this.d.lots) if (l.carry) m.set(l.id, { ...l.carry })
     for (const b of this.d.bets) {
       if (b.status !== 'lot' || !b.lotId) continue
       const x = m.get(b.lotId) ?? { rub: 0, bets: 0 }
@@ -313,7 +318,7 @@ export class Auction extends EventEmitter {
       bet.status = 'lot'
     }
     this.d.bets.unshift(bet)
-    if (this.d.bets.length > BET_LIMIT) this.d.bets.length = BET_LIMIT
+    this.trimBets()
     this.extend()
     this.changed()
     return bet
@@ -379,6 +384,17 @@ export class Auction extends EventEmitter {
     this.changed()
   }
 
+  /** Список ставок хранит последние BET_LIMIT; вытесненные засчитанные сворачиваются в итог своего лота. */
+  private trimBets(): void {
+    for (const old of this.d.bets.splice(BET_LIMIT)) {
+      if (old.status !== 'lot' || !old.lotId) continue
+      const l = this.d.lots.find((x) => x.id === old.lotId)
+      if (!l) continue
+      const c = l.carry ?? { rub: 0, bets: 0 }
+      l.carry = { rub: rub(c.rub + old.rub), bets: c.bets + 1 }
+    }
+  }
+
   /** Удалить или отклонить лот: его ставки возвращаются в очередь «Требует решения». */
   removeLot(id: unknown): void {
     const l = this.lot(id)
@@ -394,6 +410,7 @@ export class Auction extends EventEmitter {
     const b = this.lot(into)
     if (a.id === b.id) return
     for (const x of this.d.bets) if (x.lotId === a.id) x.lotId = b.id
+    if (a.carry) b.carry = { rub: rub((b.carry?.rub ?? 0) + a.carry.rub), bets: (b.carry?.bets ?? 0) + a.carry.bets }
     this.d.lots = this.d.lots.filter((x) => x.id !== a.id)
     this.changed()
   }
@@ -404,6 +421,7 @@ export class Auction extends EventEmitter {
     const n = typeof amount === 'number' && Number.isFinite(amount) ? amount : 0
     if (!(n > 0) || n > MAX_RUB) throw new Error('Сумма должна быть больше нуля')
     this.d.bets.unshift({ id: randomUUID(), ts: Date.now(), user: 'Стример', platform: 'hub', source: 'manual', rub: rub(n), raw: `${fmt(rub(n))} ₽`, text: l.name, lotId: l.id, status: 'lot' })
+    this.trimBets()
     this.changed()
   }
 
@@ -561,7 +579,7 @@ export class Auction extends EventEmitter {
   reset(keepLots: boolean): void {
     const lots = this.lotViews()
     const total = rub(lots.reduce((a, l) => a + l.rub, 0))
-    const counted = this.d.bets.filter((b) => b.status === 'lot').length
+    const counted = this.d.bets.filter((b) => b.status === 'lot').length + this.d.lots.reduce((a, l) => a + (l.carry?.bets ?? 0), 0)
     if (counted > 0) {
       this.d.archive.unshift({
         ts: Date.now(),
@@ -573,7 +591,7 @@ export class Auction extends EventEmitter {
     }
     this.d.bets = []
     if (keepLots) {
-      this.d.lots = this.d.lots.filter((l) => !l.auto)
+      this.d.lots = this.d.lots.filter((l) => !l.auto).map(({ carry: _carry, ...l }) => l)
     } else {
       this.d.lots = []
       this.d.nextNum = 1

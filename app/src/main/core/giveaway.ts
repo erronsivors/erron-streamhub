@@ -93,7 +93,11 @@ const MSG_LIMIT = 8
 const obj = (v: unknown): Record<string, unknown> => (v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : {})
 const s = (v: unknown, max: number): string => (typeof v === 'string' ? v.replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, max) : '')
 const num = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? v : 0)
-const keyOf = (user: string): string => user.toLowerCase().replace(/ё/g, 'е').trim()
+const nickOf = (user: string): string => user.toLowerCase().replace(/ё/g, 'е').trim()
+/** Участник = площадка + ник: одинаковые ники на разных площадках — разные люди. */
+const keyOf = (platform: Platform, user: string): string => `${platform}:${nickOf(user)}`
+/** Площадки с чатом: донат с сервиса донатов (без своей площадки) прибавляется участнику из чата с тем же ником. */
+const CHAT_PLATFORMS = new Set<Platform>(['twitch', 'youtube', 'vk', 'kick', 'goodgame', 'hub'])
 const PLATFORMS: Platform[] = ['twitch', 'youtube', 'vk', 'kick', 'goodgame', 'donationalerts', 'donatepay', 'donatex', 'boosty', 'obs', 'hub']
 const plat = (v: unknown): Platform => ((PLATFORMS as unknown[]).includes(v) ? (v as Platform) : 'hub')
 
@@ -102,7 +106,7 @@ function sanitizeEntry(v: unknown): GiveawayEntry | null {
   const user = s(o.user, 60)
   if (!user) return null
   return {
-    key: keyOf(user), user, platform: plat(o.platform), chat: o.chat === true, rub: Math.max(0, Math.min(1e9, num(o.rub))), ts: num(o.ts),
+    key: keyOf(plat(o.platform), user), user, platform: plat(o.platform), chat: o.chat === true, rub: Math.max(0, Math.min(1e9, num(o.rub))), ts: num(o.ts),
     ...(o.fake === true ? { fake: true } : {})
   }
 }
@@ -112,7 +116,7 @@ function sanitizeWinner(v: unknown): GiveawayWinner | null {
   const user = s(o.user, 60)
   if (!user) return null
   return {
-    key: keyOf(user), user, platform: plat(o.platform), tickets: Math.max(1, Math.round(num(o.tickets))), ts: num(o.ts), deadline: num(o.deadline),
+    key: keyOf(plat(o.platform), user), user, platform: plat(o.platform), tickets: Math.max(1, Math.round(num(o.tickets))), ts: num(o.ts), deadline: num(o.deadline),
     answered: o.answered === true, skipped: o.skipped === true,
     messages: (Array.isArray(o.messages) ? o.messages : []).slice(0, MSG_LIMIT).map((m) => ({ ts: num(obj(m).ts), text: s(obj(m).text, 300), platform: plat(obj(m).platform) })).filter((m) => m.text)
   }
@@ -156,6 +160,8 @@ export class Giveaway extends EventEmitter {
   private archive: GiveawayArchiveItem[] = []
   private timer: NodeJS.Timeout | null = null
   private revealTimer: NodeJS.Timeout | null = null
+  /** Уже выбранные победители, пока идёт показ прокрутки: итог фиксируется даже при закрытии посреди показа. */
+  private pendingChosen: (GiveawayEntry & { tickets: number })[] | null = null
   private saveTimer: NodeJS.Timeout | null = null
   private drawnAt: number | null = null
   /** Когда открыт приём: донаты раньше этого момента (повтор при переподключении сервиса) не засчитываются. */
@@ -284,10 +290,11 @@ export class Giveaway extends EventEmitter {
     if (e.test) return
     const user = s(e.user, 60)
     if (!user) return
-    const key = keyOf(user)
+    const key = keyOf(e.platform, user)
     // Проверка «на месте»: любые сообщения победителя после выбора.
     if (e.type === 'message') {
-      const w = this.winners.find((x) => x.key === key && !x.skipped)
+      // Победитель-донатер (участвовал только донатом с сервиса) может ответить в чате любой площадки — сверяем по нику.
+      const w = this.winners.find((x) => !x.skipped && (x.key === key || (!CHAT_PLATFORMS.has(x.platform) && nickOf(x.user) === nickOf(user))))
       if (w && e.ts >= w.ts && !this.reveal) {
         w.messages.unshift({ ts: e.ts || Date.now(), text: s(e.text, 300), platform: e.platform })
         if (w.messages.length > MSG_LIMIT) w.messages.length = MSG_LIMIT
@@ -309,16 +316,22 @@ export class Giveaway extends EventEmitter {
     } else if (e.type === 'donation' && cfg.rubPerTicket > 0 && (e.amountRub ?? 0) > 0) {
       if (this.seen.has(e.id) || (e.ts && e.ts < this.openedAt - 5000)) return
       this.seen.add(e.id)
-      const cur = this.entries.get(key)
+      // Донат с сервиса донатов: если в чате ровно один участник с таким ником — билеты ему; иначе отдельный участник.
+      let target = key
+      if (!CHAT_PLATFORMS.has(e.platform) && !this.entries.has(key)) {
+        const same = [...this.entries.values()].filter((x) => nickOf(x.user) === nickOf(user))
+        if (same.length === 1) target = same[0].key
+      }
+      const cur = this.entries.get(target)
       if (!cur && this.entries.size >= ENTRY_LIMIT) return
       const next = cur ? { ...cur, rub: cur.rub + (e.amountRub ?? 0) } : { key, user, platform: e.platform, chat: false, rub: e.amountRub ?? 0, ts: e.ts || Date.now() }
-      this.entries.set(key, next)
+      this.entries.set(target, next)
       this.changed()
     }
   }
 
   removeEntry(key: string): void {
-    this.entries.delete(keyOf(key))
+    this.entries.delete(String(key).slice(0, 120))
     this.changed()
   }
 
@@ -329,7 +342,7 @@ export class Giveaway extends EventEmitter {
     let added = 0
     for (let i = 0; i < 200 && added < count; i++) {
       const user = `Тест ${names[i % names.length]}${i >= names.length ? ' ' + Math.floor(i / names.length) : ''}`
-      const key = keyOf(user)
+      const key = keyOf('hub', user)
       if (this.entries.has(key)) continue
       this.entries.set(key, { key, user, platform: 'hub', chat: true, rub: randomInt(0, 4) * 150, ts: Date.now() + added, fake: true })
       added++
@@ -355,7 +368,7 @@ export class Giveaway extends EventEmitter {
   /** Победитель не ответил — отметить и выбрать другого. */
   reroll(key: string): void {
     if (this.reveal) throw new Error('Уже выбираем — дождитесь итога')
-    const w = this.winners.find((x) => x.key === keyOf(key) && !x.skipped)
+    const w = this.winners.find((x) => x.key === String(key).slice(0, 120) && !x.skipped)
     if (!w) throw new Error('Победитель не найден')
     const taken = new Set(this.winners.map((x) => x.key))
     const pool = this.list().filter((e) => !taken.has(e.key))
@@ -365,7 +378,6 @@ export class Giveaway extends EventEmitter {
   }
 
   private startReveal(chosen: (GiveawayEntry & { tickets: number })[], pool: GiveawayEntry[]): void {
-    const cfg = this.settings.get().giveaway
     const ovCfg = this.settings.get().overlays.giveaway
     const winners = chosen.map((e) => e.user)
     const others = shuffle(pool.filter((e) => !chosen.includes(e as never)).map((e) => e.user)).slice(0, 40)
@@ -375,19 +387,28 @@ export class Giveaway extends EventEmitter {
     const durationMs = Math.max(1, ovCfg.revealSec) * 1000
     this.reveal = { id: randomUUID(), names: names.slice(0, 40), winners, startedAt: Date.now() + 150, durationMs }
     this.changed()
-    this.revealTimer = setTimeout(() => {
-      this.revealTimer = null
-      const now = Date.now()
-      const fresh: GiveawayWinner[] = chosen.map((e) => ({
-        key: e.key, user: e.user, platform: e.platform, tickets: e.tickets, ts: now, deadline: now + cfg.answerSec * 1000,
-        answered: false, skipped: false, messages: []
-      }))
-      this.winners.push(...fresh)
-      this.reveal = null
-      this.drawnAt = now
-      this.changed()
-      this.emit('drawn', fresh)
-    }, durationMs + 150)
+    this.pendingChosen = chosen
+    this.revealTimer = setTimeout(() => this.finishReveal(false), durationMs + 150)
+  }
+
+  /** Итог выбора: победители записываются. quiet — без события 'drawn' (приложение закрывается посреди показа). */
+  private finishReveal(quiet: boolean): void {
+    if (this.revealTimer) clearTimeout(this.revealTimer)
+    this.revealTimer = null
+    const chosen = this.pendingChosen
+    this.pendingChosen = null
+    if (!chosen) return
+    const cfg = this.settings.get().giveaway
+    const now = Date.now()
+    const fresh: GiveawayWinner[] = chosen.map((e) => ({
+      key: e.key, user: e.user, platform: e.platform, tickets: e.tickets, ts: now, deadline: now + cfg.answerSec * 1000,
+      answered: false, skipped: false, messages: []
+    }))
+    this.winners.push(...fresh)
+    this.reveal = null
+    this.drawnAt = now
+    this.changed()
+    if (!quiet) this.emit('drawn', fresh)
   }
 
   /** Новый розыгрыш: итог в архив, участники и победители — с нуля. */
@@ -416,6 +437,8 @@ export class Giveaway extends EventEmitter {
 
   stop(): void {
     if (this.timer) clearTimeout(this.timer)
+    // Закрытие посреди показа: победители уже выбраны — записываем их, а не теряем.
+    if (this.pendingChosen) this.finishReveal(true)
     if (this.revealTimer) clearTimeout(this.revealTimer)
     this.timer = null
     this.revealTimer = null

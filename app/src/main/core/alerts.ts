@@ -129,7 +129,14 @@ interface Entry {
   /** Ждёт озвучку: показывать, только когда готово. */
   ready: boolean
   event: HubEvent
+  /** Убран из очереди (удалён, «Стоп всё», вытеснен) — озвучку для него больше не готовим. */
+  dropped?: boolean
 }
+
+/** Денежные события: при переполнении очереди их не выкидываем. */
+const MONEY_TYPES = new Set<string>(['donation', 'bits', 'sub', 'gift'])
+/** Жёсткий предел очереди даже для денежных — защита памяти, если алерты стоят на паузе очень долго. */
+const QUEUE_HARD_LIMIT = 1000
 
 /**
  * Движок алертов: одна очередь на всё приложение. Что показывать, решают правила (rules.ts),
@@ -243,9 +250,34 @@ export class AlertEngine extends EventEmitter {
       })
     }
     this.queue.push(entry)
-    if (this.queue.length > QUEUE_LIMIT) this.queue.splice(0, this.queue.length - QUEUE_LIMIT)
+    this.trimQueue()
     this.emit('change')
     this.next()
+  }
+
+  /**
+   * Очередь переполнена: сначала убираем самые старые неденежные алерты (фолловы, рейды, баллы…),
+   * денежные ждут своей очереди. Сколько убрано — в журнал.
+   */
+  private trimQueue(): void {
+    let over = this.queue.length - QUEUE_LIMIT
+    if (over <= 0) return
+    let dropped = 0
+    for (let i = 0; i < this.queue.length && over > 0; ) {
+      if (!MONEY_TYPES.has(this.queue[i].event.type)) {
+        this.queue[i].dropped = true
+        this.queue.splice(i, 1)
+        over--
+        dropped++
+      } else i++
+    }
+    // Остались одни денежные — держим до жёсткого предела.
+    const hard = this.queue.length - QUEUE_HARD_LIMIT
+    if (hard > 0) {
+      for (const x of this.queue.splice(0, hard)) x.dropped = true
+      dropped += hard
+    }
+    if (dropped) this.hub.log('hub', 'warn', `Очередь алертов переполнена — пропущено старых алертов: ${dropped}${hard > 0 ? ' (включая денежные)' : ' (денежные сохранены)'}`)
   }
 
   /** Озвучить tts-слои; алерт удлиняется, если голос не успевает договорить. */
@@ -253,6 +285,7 @@ export class AlertEngine extends EventEmitter {
     const s = this.settings.get().tts
     const e = entry.event
     for (const l of layers) {
+      if (entry.dropped) return
       try {
         const msg = cleanForSpeech(e.text ?? '', { stripLinks: s.stripLinks, badWords: s.badWords, maxChars: s.maxChars })
         // Все числа — словами (сумма уже словами в нужном роде): «лови 300» → «лови триста».
@@ -309,12 +342,14 @@ export class AlertEngine extends EventEmitter {
 
   /** Убрать один алерт из очереди. */
   remove(id: string): void {
+    for (const a of this.queue) if (a.item.id === id) a.dropped = true
     this.queue = this.queue.filter((a) => a.item.id !== id)
     this.emit('change')
   }
 
   /** «Стоп всё»: очистить очередь и убрать текущий. */
   stopAll(): void {
+    for (const a of this.queue) a.dropped = true
     this.queue = []
     this.finish()
   }

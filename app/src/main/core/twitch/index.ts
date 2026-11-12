@@ -284,28 +284,35 @@ export class TwitchConnector implements ChatConnector {
       this.hub.log('twitch', 'warn', `Twitch отозвал подписку: ${s((payload.subscription as Json)?.type)}`)
       return
     }
-    if (type === 'notification') this.onNotification(s((payload.subscription as Json)?.type), (payload.event ?? {}) as Json)
+    if (type === 'notification') this.onNotification(s((payload.subscription as Json)?.type), (payload.event ?? {}) as Json, s(meta.message_id))
   }
 
   private async subscribeAll(sessionId: string, gen: number): Promise<void> {
     const me = this.auth.account('broadcaster')
     if (!me) return
-    let ok = 0
-    const failed: string[] = []
-    await Promise.all(
+    // Результат по каждой подписке: код ответа Twitch или null (запрос не дошёл — сеть).
+    const results = await Promise.all(
       SUBS.map(async (sub) => {
         const res = await this.helix('/eventsub/subscriptions', {
           method: 'POST',
           body: JSON.stringify({ type: sub.type, version: sub.version, condition: sub.cond(me.id), transport: { method: 'websocket', session_id: sessionId } })
         }).catch(() => null)
-        if (res && (res.ok || res.status === 409)) ok++
-        else failed.push(`${sub.type}${res ? ` (${res.status})` : ''}`)
+        return { type: sub.type, status: res ? res.status : null, ok: !!res && (res.ok || res.status === 409) }
       })
     )
     if (gen !== this.generation) return
+    const ok = results.filter((r) => r.ok).length
+    const failed = results.filter((r) => !r.ok)
+    const chat = results.find((r) => r.type === 'channel.chat.message')
+    // Чат не подписался из-за сети (а не отказа Twitch) — это не «подключено»: переподключаемся заново.
+    if (chat && !chat.ok && chat.status === null) {
+      this.hub.setStatus('twitch', 'connecting', 'Не удалось подписаться на чат Twitch (нет связи) — переподключение…')
+      this.ws?.close()
+      return
+    }
     this.retryDelay = 2000
-    if (failed.length) this.hub.log('twitch', 'warn', `Не удалось подписаться: ${failed.join(', ')}. Часть событий (сабы, биты) доступна только компаньонам/партнёрам.`)
-    const chatOk = !failed.some((f) => f.startsWith('channel.chat.message '))
+    if (failed.length) this.hub.log('twitch', 'warn', `Не удалось подписаться: ${failed.map((f) => `${f.type}${f.status === null ? ' (нет связи)' : ` (${f.status})`}`).join(', ')}. Часть событий (сабы, биты) доступна только компаньонам/партнёрам.`)
+    const chatOk = !!chat?.ok
     this.hub.setStatus('twitch', chatOk ? 'ok' : 'error', chatOk ? `Подключено · ${me.name} · подписок: ${ok}/${SUBS.length}` : 'Чат не подключился — смотрите журнал')
   }
 
@@ -318,8 +325,9 @@ export class TwitchConnector implements ChatConnector {
     return out
   }
 
-  private onNotification(type: string, e: Json): void {
-    const base = { platform: 'twitch' as const }
+  /** msgId — id доставки EventSub: при повторной доставке Twitch присылает тот же, по нему хаб отсекает повтор. */
+  private onNotification(type: string, e: Json, msgId = ''): void {
+    const base = { platform: 'twitch' as const, id: msgId ? `tw-${msgId.slice(0, 90)}` : undefined }
     switch (type) {
       case 'channel.chat.message': {
         const message = (e.message ?? {}) as Json

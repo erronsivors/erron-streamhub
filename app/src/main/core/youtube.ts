@@ -456,7 +456,8 @@ export class YoutubeConnector implements ChatConnector {
       }
       if (e.code === grpc.status.UNIMPLEMENTED) {
         this.hub.log('youtube', 'warn', 'streamList недоступен — читаю чат опросом')
-        return this.poll(gen, false)
+        // Если поток не успел выдать ни одной порции — первая порция опроса тоже история, её не показываем.
+        return this.poll(gen, this.pageToken === null)
       }
       this.hub.setStatus('youtube', 'connecting', `Соединение с чатом YouTube потеряно — переподключение… (${e.details || e.code})`)
       this.retryChat(gen, this.retryDelay)
@@ -534,7 +535,8 @@ export class YoutubeConnector implements ChatConnector {
     const sn = obj(it.snippet)
     const a = obj(it.author_details)
     const type = s(sn.type)
-    const base = { platform: 'youtube' as const, user: s(a.display_name).slice(0, 100), userId: s(a.channel_id) }
+    // id события YouTube постоянный: повтор той же записи (переподключение, переход на опрос) хаб отсекает.
+    const base = { platform: 'youtube' as const, id: it.id ? `yt-${s(it.id)}` : undefined, user: s(a.display_name).slice(0, 100), userId: s(a.channel_id) }
     const micros = (v: unknown): number => Math.round(Number(v) / 10_000) / 100 || 0
     switch (type) {
       case 'TEXT_MESSAGE_EVENT': {

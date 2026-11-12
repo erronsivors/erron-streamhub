@@ -47,6 +47,8 @@ export class DonateXConnector implements DonationConnector {
   private pingTimer: NodeJS.Timeout | null = null
   private account: string | null
   private stopped = true
+  /** Номер сеанса: stop() увеличивает его, запоздавшие ответы старого сеанса ничего не делают. */
+  private gen = 0
 
   constructor(private hub: Hub, private settings: Settings, private secrets: Secrets, private store: Store) {
     hub.register(this.id, 'DonateX')
@@ -179,6 +181,7 @@ export class DonateXConnector implements DonationConnector {
 
   async start(): Promise<void> {
     this.stopped = false
+    const gen = ++this.gen
     if (!this.saved()) {
       this.hub.setStatus(this.id, 'off', 'Не подключено')
       return
@@ -186,14 +189,16 @@ export class DonateXConnector implements DonationConnector {
     this.hub.setStatus(this.id, 'connecting', 'Подключение…')
     try {
       const token = await this.token()
+      if (gen !== this.gen) return
       if (!token) {
         this.hub.setStatus(this.id, 'error', 'Вход устарел — нажмите «Войти» ещё раз')
         return
       }
       await this.me(token)
-      if (this.stopped) return
-      await this.connect(token)
+      if (this.stopped || gen !== this.gen) return
+      await this.connect(token, gen)
     } catch (e) {
+      if (gen !== this.gen) return
       const msg = (e as Error).message
       if (/не принял/.test(msg)) this.hub.setStatus(this.id, 'error', `${msg} — подключитесь заново`)
       else this.retry(`Не удалось подключиться: ${msg}`)
@@ -201,10 +206,11 @@ export class DonateXConnector implements DonationConnector {
   }
 
   /** SignalR: negotiate → WebSocket → рукопожатие {"protocol":"json","version":1}. */
-  private async connect(token: string): Promise<void> {
+  private async connect(token: string, gen: number): Promise<void> {
     const n = await http(`${HUB}/negotiate?negotiateVersion=1`, { method: 'POST', headers: { Authorization: `Bearer ${token}` } })
     if (!n.ok) throw new Error(`negotiate: HTTP ${n.status}`)
     const neg = await json<{ connectionToken?: string; connectionId?: string }>(n)
+    if (gen !== this.gen) return
     const id = neg.connectionToken ?? neg.connectionId
     if (!id) throw new Error('negotiate: нет id соединения')
     const url = `${HUB.replace(/^https/, 'wss')}?id=${encodeURIComponent(id)}&access_token=${encodeURIComponent(token)}`
@@ -285,6 +291,7 @@ export class DonateXConnector implements DonationConnector {
 
   stop(): void {
     this.stopped = true
+    this.gen++
     this.backoff.cancel()
     this.stopPing()
     const ws = this.ws

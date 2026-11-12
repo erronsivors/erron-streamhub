@@ -58,6 +58,8 @@ async function form(url: string, body: Record<string, string>): Promise<{ status
 export class TwitchAuth {
   private cache: Partial<Record<Role, TokenSet>> = {}
   private refreshing: Partial<Record<Role, Promise<string>>> = {}
+  /** Номер входа по роли: выход увеличивает его, и запоздавшее обновление токена не воскрешает сессию. */
+  private epoch: Record<Role, number> = { broadcaster: 0, bot: 0 }
 
   constructor(private secrets: Secrets, private clientId: () => string) {}
 
@@ -165,15 +167,21 @@ export class TwitchAuth {
   }
 
   private async refresh(role: Role, t: TokenSet): Promise<string> {
+    const epoch = this.epoch[role]
     const { status, json } = await form(`${ID}/token`, {
       client_id: this.clientId(),
       grant_type: 'refresh_token',
       refresh_token: t.refresh
     })
-    if (status !== 200) {
+    // Пока ждали ответ, пользователь вышел или вошёл заново — этот ответ уже не наш, ничего не сохраняем.
+    if (epoch !== this.epoch[role] || this.load(role)?.refresh !== t.refresh) throw new Error('Вход Twitch изменился — повторите действие')
+    // Стираем вход, только если Twitch именно отказал (400/401: токен отозван или недействителен).
+    // Временные сбои (429, 5xx) вход не трогают — попробуем позже.
+    if (status === 400 || status === 401) {
       this.save(role, null)
       throw new Error('Сессия Twitch истекла — войдите заново')
     }
+    if (status !== 200) throw new Error(`Twitch временно не отвечает (код ${status}) — попробуем ещё раз позже`)
     const next: TokenSet = {
       ...t,
       access: String(json.access_token),
@@ -187,6 +195,8 @@ export class TwitchAuth {
 
   /** Выход: отзываем токен у Twitch и стираем локально. */
   async logout(role: Role): Promise<void> {
+    this.epoch[role]++
+    delete this.refreshing[role]
     const t = this.load(role)
     this.save(role, null)
     if (t) await form(`${ID}/revoke`, { client_id: this.clientId(), token: t.access }).catch(() => undefined)

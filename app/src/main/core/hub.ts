@@ -5,6 +5,8 @@ import type { ConnLogEntry, ConnState, ConnStatus, HubEvent, MsgPart, Platform }
 const LOG_LIMIT = 50
 const EVENTS_LIMIT = 200
 const CHAT_LIMIT = 300
+/** Сколько последних id событий и сообщений помнить для защиты от повторов. */
+const SEEN_LIMIT = 5000
 /** Площадки с чатом: у них сбой показывается служебной строкой в ленте. */
 const CHAT_PLATFORMS = new Set<Platform>(['twitch', 'youtube', 'vk', 'kick', 'goodgame'])
 
@@ -37,6 +39,10 @@ export class Hub extends EventEmitter {
   private chat: HubEvent[] = []
   pinned: HubEvent | null = null
   private lost = new Set<Platform>()
+  /** id уже принятых событий площадок (защита от повторной доставки), старые — в начале. */
+  private seen = new Set<string>()
+  /** Проверка по базе: событие с таким id уже сохранено раньше (задаёт index.ts). */
+  known: ((id: string) => boolean) | null = null
 
   register(id: Platform, name: string): void {
     if (!this.conns.has(id)) this.conns.set(id, { id, name, state: 'off', detail: 'Не настроено', since: Date.now(), log: [] })
@@ -79,7 +85,16 @@ export class Hub extends EventEmitter {
   }
 
   /** Принять событие от коннектора. Поля чистятся здесь — один раз для всех площадок. */
-  push(e: Omit<HubEvent, 'id' | 'ts'> & { id?: string; ts?: number }): HubEvent {
+  push(e: Omit<HubEvent, 'id' | 'ts'> & { id?: string; ts?: number }): HubEvent | null {
+    // Повторная доставка того же события площадкой (переподключение, повтор вебхука) — пропускаем
+    // до алертов, правил, статистики и интерактива. Тестовые события не проверяем.
+    if (e.id && !e.test) {
+      const id = clean(e.id, 100)
+      if (this.seen.has(id)) return null
+      if (e.type !== 'message' && e.type !== 'system' && this.known?.(id)) return null
+      this.seen.add(id)
+      if (this.seen.size > SEEN_LIMIT) for (const x of this.seen) { this.seen.delete(x); if (this.seen.size <= SEEN_LIMIT) break }
+    }
     const parts: MsgPart[] | undefined = e.parts
       ?.slice(0, 200)
       .map((p) => (p.t === 'text' ? { t: 'text' as const, v: clean(p.v) } : { t: 'emote' as const, v: clean(p.v, 64), url: p.url }))

@@ -2,8 +2,13 @@ import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readdirSync, unlinkSync } from 'node:fs'
 import { readFile, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { gunzipSync, gzipSync } from 'node:zlib'
+import { promisify } from 'node:util'
+import { gunzip as gunzipCb, gzip as gzipCb } from 'node:zlib'
 import type { Store } from './db'
+
+// Сжатие в фоновом потоке libuv, а не в главном процессе: большой профиль с медиа не подвешивает окно.
+const gzip = promisify(gzipCb)
+const gunzip = promisify(gunzipCb) as (buf: Buffer, opts: { maxOutputLength: number }) => Promise<Buffer>
 import type { Settings, AppSettings } from './settings'
 import type { RuleEngine } from './rules'
 import { sanitizeRule } from './rules'
@@ -145,7 +150,7 @@ export class Profiles {
     for (const [list, dir] of [[p.media, this.mediaDir], [p.sounds, this.soundDir]] as const) {
       for (const e of list ?? []) e.data = (await readFile(join(dir, e.file))).toString('base64')
     }
-    return gzipSync(Buffer.from(JSON.stringify(p), 'utf8'))
+    return gzip(Buffer.from(JSON.stringify(p), 'utf8'))
   }
 
   /** Сохранить профиль в файл. */
@@ -160,7 +165,7 @@ export class Profiles {
     this.pending = null
     const size = (await stat(path)).size
     if (size > MAX_FILE) throw new Error('Файл слишком большой для профиля Crossember')
-    const data = this.decode(await readFile(path))
+    const data = await this.decode(await readFile(path))
     const summary: ProfileSummary = {
       createdAt: data.createdAt,
       settings: !!data.settings,
@@ -179,10 +184,10 @@ export class Profiles {
     this.pending = null
   }
 
-  private decode(buf: Buffer): ProfileFile {
+  private async decode(buf: Buffer): Promise<ProfileFile> {
     let raw: unknown
     try {
-      raw = JSON.parse(gunzipSync(buf, { maxOutputLength: MAX_JSON }).toString('utf8'))
+      raw = JSON.parse((await gunzip(buf, { maxOutputLength: MAX_JSON })).toString('utf8'))
     } catch {
       throw new Error('Это не файл профиля Crossember (или он повреждён)')
     }
@@ -276,14 +281,19 @@ export class Profiles {
       if (settings) this.settings.replaceAll(settings)
       this.pending = null
     } catch (err) {
+      let restored = false
       try {
-        const prev = this.decode(await readFile(backupPath))
+        const prev = await this.decode(await readFile(backupPath))
         this.restoreFrom(prev)
         this.store.set('media.names', namesBefore.media)
         this.store.set('sounds.names', namesBefore.sounds)
         for (const p of written) { try { unlinkSync(p) } catch { /* ок */ } }
+        restored = true
       } catch { /* откат не удался — резервная копия осталась в папке backups */ }
-      throw new Error(`Профиль не загружен, всё возвращено как было: ${(err as Error).message}`)
+      // Честно: «всё возвращено» — только если откат действительно прошёл.
+      throw new Error(restored
+        ? `Профиль не загружен, всё возвращено как было: ${(err as Error).message}`
+        : `Профиль не загружен, и вернуть всё автоматически не получилось (${(err as Error).message}). Нажмите «Вернуть как было» — резервная копия сохранена`)
     }
   }
 
@@ -303,7 +313,7 @@ export class Profiles {
   async undo(): Promise<void> {
     const last = this.backups()[0]
     if (!last) throw new Error('Резервных копий нет')
-    const p = this.decode(await readFile(last.file))
+    const p = await this.decode(await readFile(last.file))
     this.restoreFrom(p)
     // Копию, из которой вернулись, убираем — следующая «отмена» вернёт ещё более раннее состояние.
     try { unlinkSync(last.file) } catch { /* ок */ }

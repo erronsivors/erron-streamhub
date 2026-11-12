@@ -8,6 +8,8 @@ import { Backoff, UA, http, json, type DonationConnector, type DonationServiceSt
 const API = 'https://api.boosty.to'
 const SECRET_KEY = 'boosty.auth'
 const POLL_MS = 60_000
+/** Сколько последних подписок и донатов берём за один опрос. */
+const WINDOW = 20
 
 interface Auth {
   accessToken: string
@@ -48,6 +50,8 @@ export class BoostyConnector implements DonationConnector {
   private account: string | null
   private blog: string | null
   private stopped = true
+  /** Номер сеанса: stop() увеличивает его, запоздавшие ответы старого сеанса ничего не публикуют. */
+  private gen = 0
 
   constructor(private hub: Hub, private settings: Settings, private secrets: Secrets, private store: Store) {
     hub.register(this.id, 'Boosty')
@@ -179,6 +183,7 @@ export class BoostyConnector implements DonationConnector {
 
   async start(): Promise<void> {
     this.stopped = false
+    const gen = ++this.gen
     if (!this.auth()) {
       this.hub.setStatus(this.id, 'off', 'Не подключено')
       return
@@ -186,6 +191,7 @@ export class BoostyConnector implements DonationConnector {
     this.hub.setStatus(this.id, 'connecting', 'Подключение…')
     try {
       const u = await this.get<{ name?: string; blogUrl?: string; blog?: { url?: string } }>('/v1/user/current')
+      if (gen !== this.gen) return
       this.account = u.name ?? 'аккаунт Boosty'
       this.blog = u.blogUrl ?? u.blog?.url ?? null
       this.store.set('boosty.account', this.account)
@@ -200,8 +206,9 @@ export class BoostyConnector implements DonationConnector {
         return
       }
       this.backoff.reset()
-      await this.poll()
+      await this.poll(gen)
     } catch (e) {
+      if (gen !== this.gen) return
       this.fail(e as Error)
     }
   }
@@ -216,32 +223,37 @@ export class BoostyConnector implements DonationConnector {
     this.hub.setStatus(this.id, 'error', `Ошибка: ${e.message}. Повтор через ${sec} с`)
   }
 
-  private async poll(): Promise<void> {
-    if (this.stopped || !this.blog) return
+  private async poll(gen: number): Promise<void> {
+    if (this.stopped || !this.blog || gen !== this.gen) return
     const blog = encodeURIComponent(this.blog)
     const last = this.store.get<{ subTime: number; donTime: number } | null>('boosty.last', null)
     const first = !last
     const mark = last ?? { subTime: 0, donTime: 0 }
     try {
-      const subs = await this.get<{ data?: Subscriber[] }>(`/v1/blog/${blog}/subscribers?sort_by=on_time&limit=20&order=gt`)
-      const dons = await this.get<{ data?: { donationsSales?: DonationSale[] } }>(`/v1/blog/${blog}/sales/donation/?limit=20&sort_by=time&order=lt`)
+      const subs = await this.get<{ data?: Subscriber[] }>(`/v1/blog/${blog}/subscribers?sort_by=on_time&limit=${WINDOW}&order=gt`)
+      const dons = await this.get<{ data?: { donationsSales?: DonationSale[] } }>(`/v1/blog/${blog}/sales/donation/?limit=${WINDOW}&sort_by=time&order=lt`)
         .catch((e) => {
           this.hub.log(this.id, 'warn', `Донаты Boosty недоступны: ${(e as Error).message}`)
           return { data: { donationsSales: [] } }
         })
+      if (gen !== this.gen) return
       const subList = (subs.data ?? []).filter((s) => s.subscribed !== false && s.onTime)
       const donList = dons.data?.donationsSales ?? []
       const maxSub = Math.max(mark.subTime, ...subList.map((s) => s.onTime ?? 0))
       const maxDon = Math.max(mark.donTime, ...donList.map((d) => d.createdAt ?? 0))
       // Первый опрос только запоминает, что уже было: старые подписки и донаты алертами не показываем.
+      // Сравнение «не раньше отметки» (>=): событие в ту же секунду, что и последнее, не теряется, а повтор отсекает хаб по id.
       if (!first) {
-        for (const s of subList.filter((x) => (x.onTime ?? 0) > mark.subTime).sort((a, b) => (a.onTime ?? 0) - (b.onTime ?? 0))) {
+        if (donList.length >= WINDOW && donList.every((d) => (d.createdAt ?? 0) > mark.donTime)) {
+          this.hub.log(this.id, 'warn', `За минуту пришло ${WINDOW}+ донатов Boosty — часть могла не попасть в ленту, проверьте страницу Boosty`)
+        }
+        for (const s of subList.filter((x) => (x.onTime ?? 0) >= mark.subTime).sort((a, b) => (a.onTime ?? 0) - (b.onTime ?? 0))) {
           this.hub.push({
             id: `boosty:sub:${s.id}:${s.onTime}`, platform: this.id, type: 'sub', user: s.name || 'Подписчик',
             text: s.level?.name ? `Уровень «${s.level.name}»` : undefined, amount: s.price ?? s.level?.price, currency: 'RUB'
           })
         }
-        for (const d of donList.filter((x) => (x.createdAt ?? 0) > mark.donTime).sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0))) {
+        for (const d of donList.filter((x) => (x.createdAt ?? 0) >= mark.donTime).sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0))) {
           this.hub.push({
             id: `boosty:don:${d.id}`, platform: this.id, type: 'donation', user: d.user?.name || 'Аноним',
             amount: d.amount, currency: 'RUB', amountRub: d.amount
@@ -250,14 +262,16 @@ export class BoostyConnector implements DonationConnector {
       }
       this.store.set('boosty.last', { subTime: maxSub, donTime: maxDon })
       this.hub.setStatus(this.id, 'ok', `Подключено: ${this.account} · проверка раз в минуту`)
-      this.timer = setTimeout(() => void this.poll(), POLL_MS)
+      this.timer = setTimeout(() => void this.poll(gen), POLL_MS)
     } catch (e) {
+      if (gen !== this.gen) return
       this.fail(e as Error)
     }
   }
 
   stop(): void {
     this.stopped = true
+    this.gen++
     this.backoff.cancel()
     if (this.timer) clearTimeout(this.timer)
     this.timer = null

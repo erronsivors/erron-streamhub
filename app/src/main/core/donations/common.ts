@@ -124,6 +124,9 @@ export type CentrifugePublish = (channel: string, data: unknown) => void
  * Минимальный клиент Centrifugo (JSON). Понимает протокол v2 («id/method/params», публикации в result.data.data)
  * и новый формат (push.pub.data) — DonationAlerts и DonatePay используют разные версии.
  */
+/** Сколько ждать подтверждения подписки, мс. */
+const READY_MS = 30_000
+
 export class CentrifugeClient {
   private ws: WebSocket | null = null
   private seq = 1
@@ -132,6 +135,10 @@ export class CentrifugeClient {
   private closedByUs = false
   /** id команд subscribe, ждущих ответа → имя канала. */
   private subs = new Map<number, string>()
+  /** Сторож: подписка не подтвердилась за READY_MS — закрываем соединение, коннектор переподключится. */
+  private readyTimer: NodeJS.Timeout | null = null
+  /** Почему закрыли сами из-за сбоя (уходит в onClose вместо пустой причины). */
+  private failReason = ''
 
   constructor(
     private url: string,
@@ -149,6 +156,9 @@ export class CentrifugeClient {
   connect(): void {
     const ws = new WebSocket(this.url)
     this.ws = ws
+    this.failReason = ''
+    this.clearReady()
+    this.readyTimer = setTimeout(() => this.fail('подписка не подтвердилась за 30 с'), READY_MS)
     ws.onopen = () => {
       ws.send(JSON.stringify({ id: this.seq++, params: { token: this.opts.token } }))
     }
@@ -157,8 +167,10 @@ export class CentrifugeClient {
       for (const line of raw.split('\n')) if (line.trim()) this.frame(line)
     }
     ws.onclose = (c) => {
+      if (this.ws !== ws) return
       this.stopPing()
-      if (!this.closedByUs) this.opts.onClose(c.reason || `соединение закрыто (код ${c.code})`)
+      this.clearReady()
+      if (!this.closedByUs) this.opts.onClose(this.failReason || c.reason || `соединение закрыто (код ${c.code})`)
     }
     ws.onerror = () => undefined
   }
@@ -179,12 +191,17 @@ export class CentrifugeClient {
     if (f.error) {
       const ch = typeof f.id === 'number' ? this.subs.get(f.id) : undefined
       this.opts.onError(`Centrifugo${ch ? ` (подписка ${ch})` : ''}: ${f.error.message ?? JSON.stringify(f.error)}`)
+      // Ошибка входа или подписки — дальше ждать нечего: закрываем, коннектор переподключится с паузой.
+      if (f.id === 1 || ch) this.fail(ch ? `подписка ${ch} отклонена` : 'сервер отклонил вход')
       return
     }
     // Ответ на subscribe: сервер подтвердил подписку на канал.
     if (typeof f.id === 'number' && this.subs.has(f.id)) {
       this.subs.delete(f.id)
-      if (this.subs.size === 0) this.opts.onReady()
+      if (this.subs.size === 0) {
+        this.clearReady()
+        this.opts.onReady()
+      }
       return
     }
     // Ответ на connect (id 1): result.client (v2) или connect.client (новый формат).
@@ -203,7 +220,7 @@ export class CentrifugeClient {
         })
         .catch((e) => {
           this.opts.onError(`подписка не удалась: ${(e as Error).message}`)
-          this.ws?.close()
+          this.fail(`подписка не удалась: ${(e as Error).message}`)
         })
       return
     }
@@ -218,6 +235,19 @@ export class CentrifugeClient {
       // Для диагностики: только имена полей, без содержимого.
       this.opts.onError(`неизвестное сообщение сервера: ${Object.keys(f.result ?? f.push ?? f).join(', ')}`)
     }
+  }
+
+  /** Закрыть из-за сбоя: onClose получит причину, коннектор запустит повтор. */
+  private fail(reason: string): void {
+    this.clearReady()
+    if (!this.ws || this.closedByUs) return
+    this.failReason = reason
+    this.ws.close()
+  }
+
+  private clearReady(): void {
+    if (this.readyTimer) clearTimeout(this.readyTimer)
+    this.readyTimer = null
   }
 
   private startPing(): void {
@@ -236,6 +266,7 @@ export class CentrifugeClient {
   close(): void {
     this.closedByUs = true
     this.stopPing()
+    this.clearReady()
     this.ws?.close()
     this.ws = null
   }

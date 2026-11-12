@@ -35,6 +35,8 @@ export class DonationAlertsConnector implements DonationConnector {
   private backoff = new Backoff()
   private account: string | null
   private stopped = true
+  /** Номер сеанса: stop() увеличивает его, запоздавшие ответы старого сеанса ничего не делают. */
+  private gen = 0
 
   constructor(private hub: Hub, private settings: Settings, private secrets: Secrets, private store: Store) {
     hub.register(this.id, 'DonationAlerts')
@@ -114,6 +116,7 @@ export class DonationAlertsConnector implements DonationConnector {
 
   async start(): Promise<void> {
     this.stopped = false
+    const gen = ++this.gen
     const s = this.saved()
     if (!s) {
       this.hub.setStatus(this.id, 'off', 'Не подключено')
@@ -126,12 +129,14 @@ export class DonationAlertsConnector implements DonationConnector {
     this.hub.setStatus(this.id, 'connecting', 'Подключение…')
     try {
       const r = await http(`${API}/user/oauth`, { headers: { Authorization: `Bearer ${s.token}` } })
+      if (gen !== this.gen) return
       if (r.status === 401) {
         this.hub.setStatus(this.id, 'error', 'DonationAlerts не принял вход — нажмите «Войти» ещё раз')
         return
       }
       if (!r.ok) throw new Error(`HTTP ${r.status}`)
       const u = (await json<{ data: { id: number; name: string; code?: string; socket_connection_token: string } }>(r)).data
+      if (gen !== this.gen) return
       this.account = u.name || u.code || String(u.id)
       this.store.set('donationalerts.account', this.account)
       this.onChange()
@@ -139,6 +144,7 @@ export class DonationAlertsConnector implements DonationConnector {
       this.hub.log(this.id, 'info', `Профиль получен: ${this.account}. Подключаемся к каналу донатов`)
       this.connect(s.token, u.id, u.socket_connection_token)
     } catch (e) {
+      if (gen !== this.gen) return
       this.retry(`Не удалось получить профиль: ${(e as Error).message}`)
     }
   }
@@ -205,6 +211,7 @@ export class DonationAlertsConnector implements DonationConnector {
 
   stop(): void {
     this.stopped = true
+    this.gen++
     this.backoff.cancel()
     this.client?.close()
     this.client = null

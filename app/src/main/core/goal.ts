@@ -32,6 +32,14 @@ export interface GoalGift {
   undone?: boolean
 }
 
+/** Свёртка старых поступлений, вытесненных из списка. */
+export interface GoalCarry {
+  rub: number
+  count: number
+  /** Донатеры из свёрнутых поступлений (без «Вручную»), по убыванию суммы. */
+  top: { user: string; rub: number }[]
+}
+
 export interface Goal {
   id: string
   title: string
@@ -46,6 +54,8 @@ export interface Goal {
   accepting: boolean
   timeUp: boolean
   gifts: GoalGift[]
+  /** Итог поступлений, которые вытеснены из списка (он хранит последние GIFT_LIMIT): сумма и топ не теряются. */
+  carry: GoalCarry
   /** Что уже отпраздновали (id этапов и 'goal') — второй раз не празднуем. */
   fired: string[]
 }
@@ -106,6 +116,8 @@ export interface GoalReached {
 
 const GIFT_LIMIT = 2000
 const STAGE_LIMIT = 20
+/** Сколько донатеров помнить в свёртке старых поступлений. */
+const CARRY_TOP = 500
 const ARCHIVE_LIMIT = 10
 const MAX = 1_000_000_000
 /** Сколько секунд показывать праздник в оверлее. */
@@ -158,8 +170,15 @@ function sanitizeGoal(v: unknown): Goal | null {
     id: okId(o.id, /^[\w-]{1,40}$/) ?? randomUUID(), title, target, startRub: money(o.startRub), stages: sanitizeStages(o.stages),
     startedAt: num(o.startedAt) || Date.now(), endsAt, accepting: o.accepting !== false, timeUp: o.timeUp === true,
     gifts: (Array.isArray(o.gifts) ? o.gifts : []).slice(0, GIFT_LIMIT).map(sanitizeGift).filter((x): x is GoalGift => !!x),
+    carry: sanitizeCarry(o.carry),
     fired: (Array.isArray(o.fired) ? o.fired : []).filter((x): x is string => typeof x === 'string' && x.length <= 40).slice(0, STAGE_LIMIT + 1)
   }
+}
+
+function sanitizeCarry(v: unknown): GoalCarry {
+  const o = obj(v)
+  const top = (Array.isArray(o.top) ? o.top : []).slice(0, CARRY_TOP).map((x) => ({ user: s(obj(x).user, 60), rub: money(obj(x).rub) })).filter((x) => x.user && x.rub > 0)
+  return { rub: money(o.rub), count: Math.max(0, Math.round(num(o.count))), top }
 }
 
 function sanitizeArchive(v: unknown): GoalArchiveItem[] {
@@ -203,11 +222,12 @@ export class Fundraiser extends EventEmitter {
 
   collected(): number {
     if (!this.goal) return 0
-    return r2(this.goal.startRub + this.counted().reduce((a, g) => a + g.rub, 0))
+    return r2(this.goal.startRub + this.goal.carry.rub + this.counted().reduce((a, g) => a + g.rub, 0))
   }
 
   private top(n: number): { user: string; rub: number }[] {
     const m = new Map<string, { user: string; rub: number }>()
+    for (const x of this.goal?.carry.top ?? []) m.set(x.user.toLowerCase(), { ...x })
     for (const g of this.counted()) {
       if (g.source === 'hand') continue
       const k = g.user.toLowerCase()
@@ -345,7 +365,7 @@ export class Fundraiser extends EventEmitter {
     this.goal = {
       id: randomUUID(), title: p.title, target: p.target, startRub: p.startRub, stages: p.stages,
       startedAt: now, endsAt: p.durationMin > 0 ? now + p.durationMin * 60_000 : null,
-      accepting: true, timeUp: false, gifts: [], fired: []
+      accepting: true, timeUp: false, gifts: [], carry: { rub: 0, count: 0, top: [] }, fired: []
     }
     this.celebrate = null
     // Уже собранное до старта могло перекрыть этапы — их не празднуем.
@@ -372,8 +392,8 @@ export class Fundraiser extends EventEmitter {
   private toArchive(): void {
     const g = this.goal
     if (!g) return
-    if (g.gifts.length || g.startRub > 0) {
-      this.archive.unshift({ title: g.title, target: g.target, collected: this.collected(), gifts: this.counted().length, startedAt: g.startedAt, endedAt: Date.now() })
+    if (g.gifts.length || g.startRub > 0 || g.carry.count) {
+      this.archive.unshift({ title: g.title, target: g.target, collected: this.collected(), gifts: this.counted().length + g.carry.count, startedAt: g.startedAt, endedAt: Date.now() })
       if (this.archive.length > ARCHIVE_LIMIT) this.archive.length = ARCHIVE_LIMIT
     }
   }
@@ -418,7 +438,18 @@ export class Fundraiser extends EventEmitter {
   private add(gift: GoalGift): void {
     const g = this.need()
     g.gifts.unshift(gift)
-    if (g.gifts.length > GIFT_LIMIT) g.gifts.length = GIFT_LIMIT
+    // Список хранит последние GIFT_LIMIT поступлений; вытесненные сворачиваем в итог, чтобы сумма и топ не уменьшились.
+    for (const old of g.gifts.splice(GIFT_LIMIT)) {
+      if (old.undone) continue
+      g.carry.rub = r2(g.carry.rub + old.rub)
+      g.carry.count++
+      if (old.source === 'hand') continue
+      const k = old.user.toLowerCase()
+      const x = g.carry.top.find((t) => t.user.toLowerCase() === k)
+      if (x) x.rub = r2(x.rub + old.rub)
+      else g.carry.top.push({ user: old.user, rub: old.rub })
+    }
+    if (g.carry.top.length > CARRY_TOP) g.carry.top = g.carry.top.sort((a, b) => b.rub - a.rub).slice(0, CARRY_TOP)
     this.markReached(true)
     this.changed()
   }
