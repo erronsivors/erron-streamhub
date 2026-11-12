@@ -4,11 +4,11 @@
 const $ = (id) => document.getElementById(id);
 const el = CB.el;
 const LABEL = { donation: 'донат', follow: 'фоллоу', sub: 'подписка', gift: 'подарочные подписки', raid: 'рейд', bits: 'биты', reward: 'награда' };
-const ALL = ['chat', 'events', 'alerts', 'auction', 'goal', 'giveaway', 'wheel', 'counters'];
+const ALL = ['chat', 'events', 'alerts', 'auction', 'vote', 'goal', 'giveaway', 'wheel', 'counters'];
 const GROUPS = [
   { id: 'chat', name: 'Чат', blocks: ['chat'] },
   { id: 'alerts', name: 'Алерты', blocks: ['alerts', 'events'] },
-  { id: 'live', name: 'Эфир', blocks: ['auction', 'goal', 'giveaway', 'wheel', 'counters'] }
+  { id: 'live', name: 'Эфир', blocks: ['auction', 'vote', 'goal', 'giveaway', 'wheel', 'counters'] }
 ];
 const fixed = new URLSearchParams(location.search).get('b');
 
@@ -252,6 +252,7 @@ function renderLive() {
   g.replaceChildren();
   if (!dock) { g.append(el('div', 'empty', 'Загрузка…')); return; }
   if (has('auction')) g.append(auctionSec(dock.auction));
+  if (has('vote') && dock.vote) g.append(voteSec(dock.vote));
   if (has('goal')) g.append(goalSec(dock.goal));
   if (has('giveaway')) g.append(giveawaySec(dock.giveaway));
   if (has('wheel')) g.append(wheelSec(dock.wheel));
@@ -363,6 +364,39 @@ function giveawaySec(gw) {
   return s;
 }
 
+function votePoll(p, kind, showUntil) {
+  const it = el('div', 'li');
+  it.style.flexWrap = 'wrap';
+  const name = (kind === 'quick' ? 'Быстрое' : 'Долгое') + (p.source === 'twitch' ? ' · Twitch' : '');
+  const left = kind === 'quick' && p.open && p.endsAt ? p.endsAt - now() : null;
+  const st = p.result ? el('span', 'tag ok', 'итог') : p.timeUp ? el('span', 'tag warn', 'время вышло') : p.open ? el('span', 'tag ok', left != null ? clock(left) : 'идёт') : el('span', 'tag', 'приём закрыт');
+  if (left != null) st.dataset.timer = 'vote';
+  it.append(el('b', 'grow ell', name + (p.title ? ': ' + p.title : '')), st);
+  const line = el('div', 'muted small ell');
+  line.style.flexBasis = '100%';
+  line.textContent = p.result ? 'Победил: ' + p.result : p.top.length ? p.top.map((o) => o.num + ') ' + o.name + ' — ' + o.votes).join(' · ') : 'Голосов пока нет';
+  it.append(line);
+  const r = el('div', 'row');
+  r.style.flexBasis = '100%';
+  if (kind === 'quick' && p.open && p.source === 'own') r.append(btn('+30 с', () => act('vote.timer', 'add', 30), 'sm'));
+  if (kind === 'long') r.append(btn(showUntil && showUntil > now() ? 'Спрятать' : 'Показать', () => act('vote.show'), 'sm'));
+  if (p.open) r.append(btn('Завершить', () => act('vote.finish', kind), 'pri'));
+  else r.append(askBtn('vc:' + kind, 'Убрать', () => act('vote.close', kind), 'sm'));
+  if (p.pending) r.append(el('span', 'muted small', 'предложений: ' + p.pending));
+  it.append(r);
+  return it;
+}
+
+function voteSec(v) {
+  const s = sec('Голосование');
+  if (!v.quick && !v.long) { s.append(el('div', 'muted small', 'Голосований нет — запустите в Crossember → Интерактив → Голосование')); return s; }
+  const l = el('div', 'list');
+  if (v.quick) l.append(votePoll(v.quick, 'quick', null));
+  if (v.long) l.append(votePoll(v.long, 'long', v.showUntil));
+  s.append(l);
+  return s;
+}
+
 function wheelSec(w) {
   const s = sec('Колесо', w.spinning ? el('span', 'tag ok', 'крутится') : w.items ? 'вариантов: ' + (w.left || w.items) : '');
   const res = w.winner ? 'Победитель: ' + w.winner : w.result ? (w.result.kind === 'out' ? 'Выбыл: ' : 'Выпало: ') + w.result.name : w.items < 2 ? 'Добавьте варианты в Crossember → Колесо' : 'Готово к прокрутке';
@@ -393,6 +427,7 @@ setInterval(() => {
     let ms = null;
     if (id === 'auction') { ms = auctionLeft(dock.auction); if (ms != null) n.textContent = clock(ms); continue; }
     if (id === 'goal' && dock.goal && dock.goal.endsAt) n.textContent = 'осталось ' + clock(dock.goal.endsAt - now());
+    if (id === 'vote' && dock.vote && dock.vote.quick && dock.vote.quick.endsAt) { n.textContent = clock(dock.vote.quick.endsAt - now()); continue; }
     if (id === 'giveaway' && dock.giveaway.endsAt) n.textContent = 'приём · ' + clock(dock.giveaway.endsAt - now());
     if (id.startsWith('w:')) {
       const w = dock.giveaway.winners.find((x) => 'w:' + x.key === id);

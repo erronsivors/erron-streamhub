@@ -13,6 +13,7 @@ import { Auction } from './pages/Auction'
 import { Wheel } from './pages/Wheel'
 import { Goal } from './pages/Goal'
 import { Giveaway } from './pages/Giveaway'
+import { Vote } from './pages/Vote'
 import { Analytics } from './pages/Analytics'
 import { ChatStyle } from './pages/ChatStyle'
 import { ALERT_TABS, INTERACTIVE, InteractiveHub, SubTabs } from './pages/Interactive'
@@ -21,7 +22,7 @@ import { Wizard } from './pages/Wizard'
 import { ModeContext } from './components'
 import { useNow, fmtDuration } from './ui'
 
-export type Page = 'home' | 'chat' | 'events' | 'alerts' | 'rules' | 'interactive' | 'auction' | 'wheel' | 'goal' | 'giveaway' | 'analytics' | 'overlays' | 'chatstyle' | 'connections' | 'settings' | 'feedback'
+export type Page = 'home' | 'chat' | 'events' | 'alerts' | 'rules' | 'interactive' | 'auction' | 'wheel' | 'goal' | 'giveaway' | 'vote' | 'analytics' | 'overlays' | 'chatstyle' | 'connections' | 'settings' | 'feedback'
 
 /** Пункт меню и страницы, при которых он подсвечен (вложенные разделы). */
 const NAV: { id: Page; label: string; ico: string; also?: Page[] }[] = [
@@ -29,7 +30,7 @@ const NAV: { id: Page; label: string; ico: string; also?: Page[] }[] = [
   { id: 'chat', label: 'Мультичат', ico: '💬' },
   { id: 'events', label: 'События', ico: '⚡' },
   { id: 'alerts', label: 'Алерты и правила', ico: '✦', also: ['rules'] },
-  { id: 'interactive', label: 'Интерактив', ico: '◈', also: ['auction', 'wheel', 'goal', 'giveaway'] },
+  { id: 'interactive', label: 'Интерактив', ico: '◈', also: ['auction', 'vote', 'wheel', 'goal', 'giveaway'] },
   { id: 'analytics', label: 'Аналитика', ico: '◫' }
 ]
 /** Настраивается один раз — ниже, под подписью. */
@@ -148,6 +149,7 @@ export function App() {
           {page === 'wheel' && <Wheel snap={snap} />}
           {page === 'goal' && <Goal snap={snap} />}
           {page === 'giveaway' && <Giveaway snap={snap} />}
+          {page === 'vote' && <Vote snap={snap} />}
           {page === 'analytics' && <Analytics snap={snap} />}
           {page === 'feedback' && <Feedback snap={snap} />}
         </main>

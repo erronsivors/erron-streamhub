@@ -19,6 +19,7 @@ import type { Auction } from './auction'
 import type { Wheel } from './wheel'
 import type { Fundraiser } from './goal'
 import type { Giveaway } from './giveaway'
+import type { Vote } from './vote'
 import { dockView, parseAction, runAction, type DockActionTable } from './dock'
 import { chatCss, eventView, sampleChat } from './chatstyle'
 
@@ -35,6 +36,7 @@ const OVERLAYS = [
   { id: 'wheel', key: 'wheel', name: 'Колесо', size: '900 × 900' },
   { id: 'goal', key: 'goal', name: 'Сбор средств', size: '800 × 260' },
   { id: 'giveaway', key: 'giveaway', name: 'Розыгрыш', size: '800 × 300' },
+  { id: 'vote', key: 'vote', name: 'Голосование', size: '700 × 500' },
   // Окно «чат поверх игры» — открывается самим Crossember, в списке для OBS не показывается.
   { id: 'float', key: 'float', name: 'Чат поверх игры', size: '', hidden: true }
 ] as { id: string; key: string; name: string; size: string; hidden?: boolean }[]
@@ -56,6 +58,7 @@ const ASSETS: Record<string, string> = {
   'wheel.js': 'text/javascript; charset=utf-8',
   'goal.js': 'text/javascript; charset=utf-8',
   'giveaway.js': 'text/javascript; charset=utf-8',
+  'vote.js': 'text/javascript; charset=utf-8',
   'sounds.js': 'text/javascript; charset=utf-8'
 }
 
@@ -116,6 +119,7 @@ export interface OverlayExtras {
   wheel: Wheel
   goal: Fundraiser
   giveaway: Giveaway
+  vote: Vote
   /** Свои аккаунты (каналы, бот) — для выделения обращений к стримеру в чате. */
   own?: () => string[]
 }
@@ -183,8 +187,9 @@ export class OverlayServer {
     extras.wheel.on('change', () => this.broadcast({ kind: 'wheel', wheel: extras.wheel.overlay() }, 'local'))
     extras.goal.on('change', () => this.broadcast({ kind: 'goal', goal: extras.goal.overlay() }, 'local'))
     extras.giveaway.on('change', () => this.broadcast({ kind: 'giveaway', giveaway: extras.giveaway.overlay() }, 'local'))
+    extras.vote.on('change', () => this.broadcast({ kind: 'vote', vote: extras.vote.overlay() }, 'local'))
     // Док: любое изменение — одно обновление состояния (не чаще раза в 100 мс).
-    for (const src of [extras.alerts, extras.auction, extras.goal, extras.giveaway, extras.wheel, extras.counters]) src.on('change', () => this.scheduleDock())
+    for (const src of [extras.alerts, extras.auction, extras.goal, extras.giveaway, extras.wheel, extras.counters, extras.vote]) src.on('change', () => this.scheduleDock())
     hub.on('event', (e: HubEvent) => {
       if (e.type !== 'message' && e.type !== 'system' && !e.test) this.pushStats()
     })
@@ -320,7 +325,7 @@ export class OverlayServer {
       pinned: this.hub.pinned,
       ...(isDock ? { dockBlocks: s.dock.blocks, lanControl: s.lan.control } : {}),
       ...(kind === 'dock' || (kind === 'lan' && s.lan.control) ? { dock: this.dockData() } : {}),
-      ...(kind === 'local' ? { stats: this.statsData(), counters: this.extras.counters.list(), auction: this.extras.auction.overlay(), wheel: this.extras.wheel.overlay(), goal: this.extras.goal.overlay(), giveaway: this.extras.giveaway.overlay() } : {}),
+      ...(kind === 'local' ? { stats: this.statsData(), counters: this.extras.counters.list(), auction: this.extras.auction.overlay(), wheel: this.extras.wheel.overlay(), goal: this.extras.goal.overlay(), giveaway: this.extras.giveaway.overlay(), vote: this.extras.vote.overlay() } : {}),
       // Снимок для оверлея алертов после (пере)подключения: что идёт сейчас и с какого момента.
       ...(ov === 'alert' ? { alert: this.extras.alerts.nowPlaying() } : {})
     })

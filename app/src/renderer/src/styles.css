@@ -537,3 +537,15 @@ select.input { cursor: pointer; }
 .cx-list.m-h .ev-head { display: inline-flex; flex-wrap: nowrap; }
 .cx-list.m-h .ev-body { display: inline; margin-left: .5em; }
 .cs-actions { margin-top: 12px; }
+
+/* ---------- Голосование ---------- */
+.vote-tabs { margin-bottom: 16px; }
+.vote-tabs button { display: inline-flex; align-items: center; gap: 8px; }
+.vote-new { margin-bottom: 18px; }
+.vote-opts-edit { display: flex; flex-direction: column; gap: 8px; }
+.vote-num { flex: none; display: inline-flex; align-items: center; justify-content: center; min-width: 26px; height: 26px; padding: 0 6px; border-radius: 8px; background: var(--coal-3); border: 1px solid var(--line-2); font: 700 12px var(--f-mono); color: var(--ink-2); }
+.vote-sep { margin: 16px 0 8px; font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted-2); }
+.vote-sep:first-of-type { margin-top: 4px; }
+.vote-how { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 8px; color: var(--ink-2); font-size: 14px; }
+.vote-sum { min-width: 190px; }
+.auc-clock.vote-word { font-size: 34px; }

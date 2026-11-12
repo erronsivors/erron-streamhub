@@ -4,6 +4,7 @@ import type { Page } from '../App'
 /** Инструменты раздела «Интерактив»: игры со зрителями. Новые добавляются сюда — плиткой и вкладкой. */
 export const INTERACTIVE: { id: Page; label: string; ico: string; desc: string }[] = [
   { id: 'auction', label: 'Аукцион', ico: '◈', desc: 'Зрители донатят за лоты, побеждает лидер или колесо.' },
+  { id: 'vote', label: 'Голосование', ico: '☰', desc: 'Быстрое на эфир и долгое между эфирами: чат, донаты, баллы или Twitch.' },
   { id: 'wheel', label: 'Колесо', ico: '◎', desc: 'Случайный выбор из своего списка или лотов аукциона.' },
   { id: 'goal', label: 'Сбор средств', ico: '◔', desc: 'Цель с этапами, донаты засчитываются сами.' },
   { id: 'giveaway', label: 'Розыгрыш', ico: '❖', desc: 'Участие словом в чате, билеты за донат, честный выбор.' }
@@ -46,6 +47,18 @@ export function toolStatus(id: Page, snap: HubSnapshot, now: number): ToolStatus
       if (a.winner) return { text: `Победил: ${a.winner.name}`, live: false, extra, badge: pending }
       if (a.timeUp) return { text: 'Время вышло', live: false, extra, badge: pending }
       return { text: a.lots.length ? 'Пауза' : 'Не запущен', live: false, extra, badge: pending }
+    }
+    case 'vote': {
+      const v = snap.vote
+      const pending = (v.quick?.pending.length ?? 0) + (v.long?.pending.length ?? 0)
+      const q = v.quick
+      const l = v.long
+      const extra = l ? `Долгое: ${l.open ? (l.ranked[0]?.votes ? l.ranked[0].name : 'идёт') : 'итог'}` : undefined
+      if (q && q.open) return { text: q.timer.endsAt ? `● Быстрое · ${clock(q.timer.endsAt - now)}` : '● Быстрое идёт', live: true, extra, badge: pending }
+      if (q && q.result) return { text: `Итог: ${q.result.name}`, live: false, extra, badge: pending }
+      if (l && l.open) return { text: '● Долгое идёт', live: true, extra: plural(l.total, 'голос', 'голоса', 'голосов'), badge: pending }
+      if (l && l.result) return { text: `Итог: ${l.result.name}`, live: false, badge: pending }
+      return { text: 'Не запущено', live: false, badge: pending }
     }
     case 'wheel': {
       const w = snap.wheel

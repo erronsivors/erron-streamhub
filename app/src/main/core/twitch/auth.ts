@@ -20,7 +20,8 @@ export const SCOPES: Record<Role, string[]> = {
     'channel:read:redemptions',
     'moderator:manage:chat_messages',
     'moderator:manage:banned_users',
-    'channel:manage:broadcast'
+    'channel:manage:broadcast',
+    'channel:manage:polls'
   ],
   bot: ['user:write:chat']
 }

@@ -23,6 +23,7 @@ import { Auction } from './core/auction'
 import { Wheel } from './core/wheel'
 import { Fundraiser, type GoalReached } from './core/goal'
 import { Giveaway, type GiveawayWinner } from './core/giveaway'
+import { Vote, type PollView } from './core/vote'
 import { Analytics, CHAT_PLATFORMS, isAnalyticsPeriod, type ChatPlatform } from './core/analytics'
 import { Profiles, type ProfilePart } from './core/profile'
 import { KickAuth } from './core/kickauth'
@@ -104,6 +105,7 @@ let auction: Auction
 let wheel: Wheel
 let goal: Fundraiser
 let giveaway: Giveaway
+let vote: Vote
 let analytics: Analytics
 let profiles: Profiles
 let kickAuth: KickAuth
@@ -147,6 +149,7 @@ function snapshot(): HubSnapshot {
     wheel: wheel.state(),
     goal: goal.state(),
     giveaway: giveaway.state(),
+    vote: vote.state(),
     feedback: { email: FEEDBACK_EMAIL, crash: logger?.crash() ?? null },
     alertOverlays: server ? server.openCount('alert') : 0,
     float: { open: floatChat?.isOpen ?? false, editing: floatChat?.isEditing ?? false, hotkey: FLOAT_HOTKEY.replace('CommandOrControl', 'Ctrl') }
@@ -325,6 +328,30 @@ app.whenReady().then(async () => {
     const st = giveaway.state()
     announce(cfg.winText, { приз: st.prize || 'розыгрыш', слово: cfg.keyword, победители: list.map((w) => w.user).join(', ') })
   })
+  vote = new Vote(store, settings, hub, () => obs.state.streaming || chats.states().some((p) => p.live))
+  vote.on('change', pushUpdate)
+  vote.setTwitch({
+    available: () => twitch.pollAccess(),
+    create: (title, choices, sec, points) => twitch.createPoll(title, choices, sec, points),
+    end: (id) => twitch.endPoll(id)
+  })
+  twitch.onPoll = (e) => vote.twitchEvent(e)
+  // Голосование: старт и итог — в чат на всех площадках, где можно писать (если включено).
+  const voteSay = (tpl: string, p: PollView): void => {
+    const cfg = settings.get().vote
+    if (!cfg.announce || !tpl.trim()) return
+    const list = p.options.slice(0, 10).map((o) => `${o.num}) ${o.name}`).join(' ')
+    const r = p.result
+    const votes = r ? `${r.votes.toLocaleString('ru-RU')} из ${p.total.toLocaleString('ru-RU')}` : ''
+    const text = tpl.replace(/\{(вопрос|варианты|победитель|голоса)\}/g, (_, k: string) => ({ вопрос: p.title || 'голосование', варианты: list, победитель: r?.name ?? '', голоса: votes } as Record<string, string>)[k] ?? '')
+      .replace(/\s+/g, ' ').trim().slice(0, 450)
+    const targets = chats.states().filter((x) => x.canSend).map((x) => x.id)
+    if (!text || !targets.length) return
+    chats.send(text, targets, 'broadcaster').catch((e: Error) => hub.log('hub', 'warn', `Голосование: не удалось написать в чат — ${e.message}`))
+  }
+  // Родное голосование Twitch Twitch объявляет сам — пишем только о своём.
+  vote.on('started', (p: PollView) => { if (p.source === 'own') voteSay(settings.get().vote.startText, p) })
+  vote.on('finished', (p: PollView) => voteSay(settings.get().vote.winText, p))
   rules = new RuleEngine(hub, store, settings, templates, {
     play: (plan, e, force) => alerts.play(plan, e, force),
     obs: runObs,
@@ -390,10 +417,14 @@ app.whenReady().then(async () => {
       'giveaway.close': () => giveaway.close(false),
       'giveaway.draw': () => giveaway.draw(settings.get().giveaway.winners),
       'giveaway.reroll': (key) => giveaway.reroll(str(key, 100)),
+      'vote.finish': (kind) => { vote.finish(kind === 'long' ? 'long' : 'quick') },
+      'vote.close': (kind) => vote.close(kind === 'long' ? 'long' : 'quick'),
+      'vote.timer': (op, sec) => vote.timer(str(op, 10), sec),
+      'vote.show': () => vote.toggleShow(),
       'wheel.spin': () => { wheel.spin() },
       counter: (id, op) => counters.apply(str(id, 100), op === 'sub' ? 'sub' : 'add', 1)
     }
-  }, { alerts, stats, sounds, media, tts, counters, auction, wheel, goal, giveaway, own: ownAccounts })
+  }, { alerts, stats, sounds, media, tts, counters, auction, wheel, goal, giveaway, vote, own: ownAccounts })
   obs.onChange = pushUpdate
   server.onClients = pushUpdate
   floatChat = new FloatChat(settings, hub, () => server.overlayUrl('float'))
@@ -413,6 +444,7 @@ app.whenReady().then(async () => {
     if (s.donatex.customClientId !== prev.donatex.customClientId && dx.state().method === 'oauth') void dx.logout()
     if (s.boosty.poll !== prev.boosty.poll) void boosty.restart()
     if (s.twitch.customClientId !== prev.twitch.customClientId || s.twitch.thirdPartyEmotes !== prev.twitch.thirdPartyEmotes) void twitch.restart()
+    if (s.vote.hotkey !== prev.vote.hotkey) syncHotkeys()
     prev = s
     pushUpdate()
   }
@@ -550,6 +582,23 @@ app.whenReady().then(async () => {
   handle('hub:aucFinish', () => auction.finish())
   handle('hub:aucReset', (keepLots) => auction.reset(keepLots === true))
   handle('hub:aucClearArchive', () => auction.clearArchive())
+  // ---------- Голосование ----------
+  const vkind = (k: unknown): 'quick' | 'long' => (k === 'long' ? 'long' : 'quick')
+  handle('hub:voteStart', (v) => vote.start(v))
+  handle('hub:voteFinish', (k) => vote.finish(vkind(k)))
+  handle('hub:voteClose', (k) => vote.close(vkind(k)))
+  handle('hub:voteOpen', (k, v) => vote.setOpen(vkind(k), v === true))
+  handle('hub:voteTimer', (op, sec) => vote.timer(str(op, 10), sec))
+  handle('hub:voteTitle', (k, t) => vote.setTitle(vkind(k), str(t, 200)))
+  handle('hub:voteSuggest', (k, v) => vote.setSuggest(vkind(k), v === true))
+  handle('hub:voteOptAdd', (k, name) => vote.addOption(vkind(k), str(name, 200)))
+  handle('hub:voteOptRename', (k, id, name) => vote.renameOption(vkind(k), str(id, 100), str(name, 200)))
+  handle('hub:voteOptRemove', (k, id) => vote.removeOption(vkind(k), str(id, 100)))
+  handle('hub:voteOptVotes', (k, id, n) => vote.addVotes(vkind(k), str(id, 100), n))
+  handle('hub:voteApprove', (k, id, name, into) => vote.approve(vkind(k), str(id, 100), typeof name === 'string' ? str(name, 200) : undefined, typeof into === 'string' ? str(into, 100) : undefined))
+  handle('hub:voteReject', (k, id) => vote.reject(vkind(k), str(id, 100)))
+  handle('hub:voteShow', (v) => (v === false ? vote.hide() : vote.show()))
+  handle('hub:voteClearArchive', () => vote.clearArchive())
   // ---------- Колесо ----------
   handle('hub:wheelSetItems', (list) => wheel.setItems(list))
   handle('hub:wheelLoadLots', () => wheel.loadLots(auction.state().lots))
@@ -702,7 +751,7 @@ const ruleKeys = new Map<string, string>()
 let ruleKeysSig = ''
 function syncHotkeys(): void {
   const want = rules.hotkeys()
-  const sig = JSON.stringify(want)
+  const sig = JSON.stringify([want, settings.get().vote.hotkey])
   if (sig === ruleKeysSig) return
   ruleKeysSig = sig
   for (const accel of ruleKeys.keys()) globalShortcut.unregister(accel)
@@ -716,7 +765,19 @@ function syncHotkeys(): void {
     else errors[id] = 'это сочетание занято другой программой'
   }
   rules.setHotkeyErrors(errors)
+  // Голосование: показать/спрятать долгое.
+  const vh = settings.get().vote.hotkey
+  if (voteKey) { globalShortcut.unregister(voteKey); voteKey = '' }
+  let voteErr = ''
+  if (vh) {
+    if (vh === floatKey) voteErr = 'это сочетание занято плавающим чатом'
+    else if (ruleKeys.has(vh)) voteErr = 'это сочетание уже у правила'
+    else if (globalShortcut.register(vh, () => vote.toggleShow())) voteKey = vh
+    else voteErr = 'это сочетание занято другой программой'
+  }
+  vote.setHotkeyError(voteErr)
 }
+let voteKey = ''
 
 // Выключение Windows — это нормальный выход, не «неожиданное закрытие».
 app.on('ready', () => powerMonitor.on('shutdown', () => logger?.close()))
@@ -725,11 +786,13 @@ app.on('before-quit', () => {
   logger?.info('app', 'Выход')
   logger?.close()
   for (const accel of ruleKeys.keys()) globalShortcut.unregister(accel)
+  if (voteKey) globalShortcut.unregister(voteKey)
   rules?.dispose()
   auction?.stop()
   wheel?.stop()
   goal?.stop()
   giveaway?.stop()
+  vote?.stop()
   analytics?.stop()
   kickAuth?.cancelLogin()
   floatChat?.close()

@@ -7,7 +7,7 @@ import { DOCK_BLOCKS, DOCK_PRESETS, type DockBlock } from '../../../main/core/do
 import { KeyRotate } from './Settings'
 
 type Key = keyof AppSettings['overlays']
-const KEY: Record<string, Key> = { alert: 'alert', chat: 'chat', 'chat-h': 'chatH', pinned: 'pinned', top: 'top', last: 'last', counter: 'counter', auction: 'auction', wheel: 'wheel', goal: 'goal', giveaway: 'giveaway' }
+const KEY: Record<string, Key> = { alert: 'alert', chat: 'chat', 'chat-h': 'chatH', pinned: 'pinned', top: 'top', last: 'last', counter: 'counter', auction: 'auction', wheel: 'wheel', goal: 'goal', giveaway: 'giveaway', vote: 'vote' }
 const DESC: Record<string, string> = {
   alert: 'Донаты, подписки, рейды, фолловы — по очереди, по центру экрана.',
   chat: 'Колонка чата: новые сообщения снизу.',
@@ -19,7 +19,8 @@ const DESC: Record<string, string> = {
   auction: 'Таймер и топ лотов с полосками доли, в конце — победитель. Ники и сообщения зрителей не показываются.',
   wheel: 'Появляется, когда крутите колесо, показывает итог и само прячется. Источник можно держать включённым всегда.',
   goal: 'Цель с полоской прогресса и этапами, последний донат, топ сбора и срок. Этап или цель достигнуты — короткий праздник.',
-  giveaway: 'Во время приёма — слово для участия, число участников и таймер. При выборе ники прокручиваются до победителя.'
+  giveaway: 'Во время приёма — слово для участия, число участников и таймер. При выборе ники прокручиваются до победителя.',
+  vote: 'Вопрос, варианты с номерами и полосками, таймер и итог. Быстрое висит до конца, долгое появляется иногда. Ники зрителей не показываются.'
 }
 
 export function Overlays({ snap, go }: { snap: HubSnapshot; go?: (p: Page) => void }) {
@@ -51,11 +52,11 @@ export function Overlays({ snap, go }: { snap: HubSnapshot; go?: (p: Page) => vo
 }
 
 const BLOCK_NAMES: Record<DockBlock, string> = {
-  chat: 'Чат', events: 'События', alerts: 'Алерты', auction: 'Аукцион', goal: 'Сбор средств', giveaway: 'Розыгрыш', wheel: 'Колесо', counters: 'Счётчики'
+  chat: 'Чат', events: 'События', alerts: 'Алерты', auction: 'Аукцион', vote: 'Голосование', goal: 'Сбор средств', giveaway: 'Розыгрыш', wheel: 'Колесо', counters: 'Счётчики'
 }
 const BLOCK_DESC: Record<DockBlock, string> = {
   chat: 'читать, писать, закреплять', events: 'донаты, подписки, рейды', alerts: 'очередь, пауза, пропуск, тест',
-  auction: 'таймер, приём, итог', goal: 'пауза, срок, добавить сумму', giveaway: 'приём, выбор, перевыбор',
+  auction: 'таймер, приём, итог', vote: 'итог, время, показать долгое', goal: 'пауза, срок, добавить сумму', giveaway: 'приём, выбор, перевыбор',
   wheel: 'кнопка «Крутить»', counters: 'плюс и минус'
 }
 const PRESET_NAMES: { id: keyof typeof DOCK_PRESETS; name: string }[] = [
@@ -135,6 +136,7 @@ function OverlayCard({ o, snap, go }: { o: OverlayInfo; snap: HubSnapshot; go?: 
       )}
       {key === 'counter' && <CounterSettings c={cfg as AppSettings['overlays']['counter']} snap={snap} set={set} />}
       {key === 'auction' && <AuctionOverlaySettings c={cfg as AppSettings['overlays']['auction']} set={set} />}
+      {key === 'vote' && <VoteOverlaySettings c={cfg as AppSettings['overlays']['vote']} set={set} />}
       {key === 'giveaway' && (
         <div className="grid g3" style={{ gap: 10 }}>
           <NumberField label="Шрифт" value={(cfg as AppSettings['overlays']['giveaway']).fontSize} min={12} max={72} suffix="px" onChange={(v) => set({ fontSize: v })} />
@@ -215,6 +217,26 @@ function AuctionOverlaySettings({ c, set }: { c: AppSettings['overlays']['auctio
         <NumberField label="Размер шрифта" value={c.fontSize} min={12} max={72} suffix="px" onChange={(v) => set({ fontSize: v })} />
       </div>
       <Toggle on={c.showTimer} onChange={(v) => set({ showTimer: v })} label="Показывать таймер" />
+    </>
+  )
+}
+
+function VoteOverlaySettings({ c, set }: { c: AppSettings['overlays']['vote']; set: (p: Record<string, unknown>) => void }) {
+  return (
+    <>
+      <div className="field">
+        <label>Что показывать у варианта</label>
+        <div className="seg">
+          <button className={c.show === 'votes' ? 'on' : ''} onClick={() => set({ show: 'votes' })}>Голоса</button>
+          <button className={c.show === 'pct' ? 'on' : ''} onClick={() => set({ show: 'pct' })}>Долю, %</button>
+          <button className={c.show === 'both' ? 'on' : ''} onClick={() => set({ show: 'both' })}>Обе</button>
+        </div>
+      </div>
+      <div className="grid g2" style={{ gap: 10 }}>
+        <NumberField label="Сколько вариантов" value={c.count} min={1} max={20} onChange={(v) => set({ count: v })} />
+        <NumberField label="Размер шрифта" value={c.fontSize} min={12} max={72} suffix="px" onChange={(v) => set({ fontSize: v })} />
+      </div>
+      <Toggle on={c.showHint} onChange={(v) => set({ showHint: v })} label="Подсказка «как голосовать» внизу" />
     </>
   )
 }

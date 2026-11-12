@@ -9,6 +9,7 @@ import type { AlertTemplate, ObsAction } from '../main/core/templates'
 import type { Rule } from '../main/core/rules'
 import type { Counter } from '../main/core/counters'
 import type { AuctionBet, AuctionLot, AuctionState } from '../main/core/auction'
+import type { PollDraft, VoteKind, VoteOption, VoteResult } from '../main/core/vote'
 import type { WheelItem } from '../main/core/wheel'
 import type { GoalInput } from '../main/core/goal'
 import type { ProfilePart, ProfileSummary } from '../main/core/profile'
@@ -92,6 +93,21 @@ const api = {
   aucFinish: () => call<AuctionState['winner']>('hub:aucFinish'),
   aucReset: (keepLots: boolean) => call('hub:aucReset', keepLots),
   aucClearArchive: () => call('hub:aucClearArchive'),
+  voteStart: (d: PollDraft) => call('hub:voteStart', d),
+  voteFinish: (k: VoteKind) => call<VoteResult | null>('hub:voteFinish', k),
+  voteClose: (k: VoteKind) => call('hub:voteClose', k),
+  voteOpen: (k: VoteKind, v: boolean) => call('hub:voteOpen', k, v),
+  voteTimer: (op: 'add' | 'sub' | 'clear', sec?: number) => call('hub:voteTimer', op, sec),
+  voteTitle: (k: VoteKind, title: string) => call('hub:voteTitle', k, title),
+  voteSuggest: (k: VoteKind, v: boolean) => call('hub:voteSuggest', k, v),
+  voteOptAdd: (k: VoteKind, name: string) => call<VoteOption>('hub:voteOptAdd', k, name),
+  voteOptRename: (k: VoteKind, id: string, name: string) => call('hub:voteOptRename', k, id, name),
+  voteOptRemove: (k: VoteKind, id: string) => call('hub:voteOptRemove', k, id),
+  voteOptVotes: (k: VoteKind, id: string, n: number) => call('hub:voteOptVotes', k, id, n),
+  voteApprove: (k: VoteKind, id: string, name?: string, into?: string) => call('hub:voteApprove', k, id, name, into),
+  voteReject: (k: VoteKind, id: string) => call('hub:voteReject', k, id),
+  voteShow: (v: boolean) => call('hub:voteShow', v),
+  voteClearArchive: () => call('hub:voteClearArchive'),
   wheelSetItems: (items: WheelItem[]) => call('hub:wheelSetItems', items),
   wheelLoadLots: () => call<number>('hub:wheelLoadLots'),
   wheelSpin: () => call('hub:wheelSpin'),

@@ -5,18 +5,19 @@ import type { GoalOverlayView } from './goal'
 import type { GiveawayState, GiveawayOverlayView } from './giveaway'
 import type { WheelState, WheelOverlayView } from './wheel'
 import type { Counter } from './counters'
+import type { VoteState, PollView } from './vote'
 
 /**
  * Док для OBS (Docks → Custom Browser Docks) и пульт второго ПК — одна страница из блоков.
  * Какие блоки показывать, выбирает сам стример (готовые наборы или галочки).
  */
 
-export const DOCK_BLOCKS = ['chat', 'events', 'alerts', 'auction', 'goal', 'giveaway', 'wheel', 'counters'] as const
+export const DOCK_BLOCKS = ['chat', 'events', 'alerts', 'auction', 'vote', 'goal', 'giveaway', 'wheel', 'counters'] as const
 export type DockBlock = (typeof DOCK_BLOCKS)[number]
 
 export const DOCK_PRESETS: Record<'operator' | 'buttons' | 'chat', DockBlock[]> = {
   operator: [...DOCK_BLOCKS],
-  buttons: ['alerts', 'auction', 'goal', 'giveaway', 'wheel', 'counters'],
+  buttons: ['alerts', 'auction', 'vote', 'goal', 'giveaway', 'wheel', 'counters'],
   chat: ['chat', 'events', 'alerts']
 }
 
@@ -38,6 +39,7 @@ export interface DockSources {
   giveaway: { state(): GiveawayState; overlay(): GiveawayOverlayView }
   wheel: { state(): WheelState; overlay(): WheelOverlayView }
   counters: { list(): Counter[] }
+  vote: { state(): VoteState }
 }
 
 interface AlertRow { id: string; summary: string; platform: Platform; test: boolean }
@@ -70,6 +72,24 @@ export interface DockView {
   }
   wheel: { items: number; left: number; spinning: boolean; result: { kind: 'win' | 'out'; name: string } | null; winner: string | null; fromAuction: boolean }
   counters: { id: string; name: string; value: number }[]
+  vote: { quick: DockPoll | null; long: DockPoll | null; showUntil: number | null }
+}
+
+interface DockPoll {
+  source: 'own' | 'twitch'
+  title: string
+  open: boolean
+  timeUp: boolean
+  endsAt: number | null
+  total: number
+  pending: number
+  top: { num: number; name: string; votes: number }[]
+  result: string | null
+}
+
+const dockPoll = (p: PollView | null): DockPoll | null => p && {
+  source: p.source, title: p.title, open: p.open, timeUp: p.timeUp, endsAt: p.timer.endsAt, total: p.total, pending: p.pending.length,
+  top: p.ranked.slice(0, 3).map((o) => ({ num: o.num, name: o.name, votes: o.votes })), result: p.result?.name ?? null
 }
 
 const row = (a: AlertQueueState['queue'][number]): AlertRow => ({ id: a.id, summary: a.summary, platform: a.platform, test: a.test })
@@ -107,7 +127,8 @@ export function dockView(src: DockSources): DockView {
       result: wh.result ? { kind: wh.result.kind, name: wh.result.name } : null,
       winner: wh.winner?.name ?? null, fromAuction: wh.fromAuction
     },
-    counters: src.counters.list().map((c) => ({ id: c.id, name: c.name, value: c.value }))
+    counters: src.counters.list().map((c) => ({ id: c.id, name: c.name, value: c.value })),
+    vote: (() => { const v = src.vote.state(); return { quick: dockPoll(v.quick), long: dockPoll(v.long), showUntil: v.showUntil } })()
   }
 }
 

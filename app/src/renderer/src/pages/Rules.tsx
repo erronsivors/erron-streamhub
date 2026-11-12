@@ -70,7 +70,7 @@ function accelFrom(e: KeyboardEvent): string | null {
 }
 
 /** Поле записи горячей клавиши: нажмите сочетание — оно запишется. */
-function HotkeyInput({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+export function HotkeyInput({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   const [rec, setRec] = useState(false)
   const [hint, setHint] = useState('')
   return (

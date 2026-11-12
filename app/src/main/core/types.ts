@@ -13,6 +13,7 @@ import type { ProfileState } from './profile'
 import type { StreamInfoState } from './streaminfo'
 import type { KickAuthState } from './kickauth'
 import type { AuctionState } from './auction'
+import type { VoteState } from './vote'
 import type { WheelState } from './wheel'
 import type { GoalState } from './goal'
 import type { GiveawayState } from './giveaway'
@@ -153,6 +154,7 @@ export interface HubSnapshot {
   wheel: WheelState
   goal: GoalState
   giveaway: GiveawayState
+  vote: VoteState
   /** Обратная связь: адрес автора и последняя серьёзная ошибка (для плашки «Сообщить об ошибке»). */
   feedback: { email: string; crash: CrashInfo | null }
   /** Сколько копий оверлея «Алерты» сейчас открыто (0 — алерты и озвучку некому показать). */

@@ -3,6 +3,7 @@ import type { Hub } from '../hub'
 import type { Settings } from '../settings'
 import type { Secrets } from '../secrets'
 import type { Badge, HubEvent, TwitchState } from '../types'
+import type { TwitchPollEvent } from '../vote'
 import { SHARED_CLIENT_ID, TwitchAuth, type DeviceStart, type Role } from './auth'
 import { EmoteCache } from './emotes'
 import type { ImageCache } from '../imgcache'
@@ -27,6 +28,9 @@ const SUBS: { type: string; version: string; cond: (b: string) => Json }[] = [
   { type: 'channel.cheer', version: '1', cond: (b) => ({ broadcaster_user_id: b }) },
   { type: 'channel.raid', version: '1', cond: (b) => ({ to_broadcaster_user_id: b }) },
   { type: 'channel.channel_points_custom_reward_redemption.add', version: '1', cond: (b) => ({ broadcaster_user_id: b }) },
+  { type: 'channel.poll.begin', version: '1', cond: (b) => ({ broadcaster_user_id: b }) },
+  { type: 'channel.poll.progress', version: '1', cond: (b) => ({ broadcaster_user_id: b }) },
+  { type: 'channel.poll.end', version: '1', cond: (b) => ({ broadcaster_user_id: b }) },
   { type: 'stream.online', version: '1', cond: (b) => ({ broadcaster_user_id: b }) },
   { type: 'stream.offline', version: '1', cond: (b) => ({ broadcaster_user_id: b }) }
 ]
@@ -47,6 +51,8 @@ export class TwitchConnector implements ChatConnector {
   live = false
   viewers: number | null = null
   onChange: () => void = () => undefined
+  /** Голосование Twitch: начато, идёт, закончено (подключается к модулю голосования). */
+  onPoll: (e: TwitchPollEvent) => void = () => undefined
 
   constructor(private hub: Hub, private settings: Settings, secrets: Secrets, img: ImageCache) {
     this.emotes = new EmoteCache(img)
@@ -390,6 +396,17 @@ export class TwitchConnector implements ChatConnector {
           text: [s((e.reward as Json)?.title), s(e.user_input)].filter(Boolean).join(' — ')
         })
         break
+      case 'channel.poll.begin':
+      case 'channel.poll.progress':
+      case 'channel.poll.end': {
+        const choices = (Array.isArray(e.choices) ? (e.choices as Json[]) : []).map((c) => ({ id: s(c.id), title: s(c.title), votes: Number(c.votes) || 0 }))
+        const ends = Date.parse(s(e.ends_at || e.ended_at))
+        this.onPoll({
+          phase: type === 'channel.poll.begin' ? 'begin' : type === 'channel.poll.progress' ? 'progress' : 'end',
+          id: s(e.id), title: s(e.title), choices, endsAt: Number.isFinite(ends) ? ends : null, status: s(e.status)
+        })
+        break
+      }
       case 'stream.online':
         this.live = true
         void this.pollViewers()
@@ -433,6 +450,43 @@ export class TwitchConnector implements ChatConnector {
   // ---------- название и категория эфира ----------
 
   /** Можно ли менять название: вошёл стример и у входа есть право channel:manage:broadcast (появилось в этапе 5). */
+  /** Голосования: нужно право channel:manage:polls (старый вход его не давал). */
+  pollAccess(): 'ok' | 'login' | 'relogin' {
+    if (!this.auth.account('broadcaster')) return 'login'
+    return this.auth.hasScope('broadcaster', 'channel:manage:polls') ? 'ok' : 'relogin'
+  }
+
+  /** Создать голосование Twitch. Доступно компаньонам и партнёрам. */
+  async createPoll(title: string, choices: string[], sec: number, pointsPerVote: number): Promise<{ id: string; endsAt: number | null; choices: { id: string; title: string }[] }> {
+    const me = this.auth.account('broadcaster')
+    if (!me) throw new Error('Twitch не подключён')
+    const body: Json = { broadcaster_id: me.id, title: title.slice(0, 60), choices: choices.slice(0, 5).map((c) => ({ title: c.slice(0, 25) })), duration: Math.min(1800, Math.max(15, Math.round(sec))) }
+    if (pointsPerVote > 0) { body.channel_points_voting_enabled = true; body.channel_points_per_vote = Math.min(1_000_000, Math.round(pointsPerVote)) }
+    const res = await this.helix('/polls', { method: 'POST', body: JSON.stringify(body) })
+    const j = (await res.json().catch(() => ({}))) as { data?: Json[]; message?: string }
+    if (!res.ok) {
+      if (res.status === 403) throw new Error('Twitch не разрешил голосование: оно доступно только компаньонам и партнёрам')
+      if (res.status === 401) throw new Error('Нужно новое разрешение на голосования — войдите в Twitch заново (Подключения → Twitch)')
+      throw new Error(`Twitch не создал голосование (${res.status}${j.message ? `: ${String(j.message).slice(0, 120)}` : ''})`)
+    }
+    const d = j.data?.[0] ?? {}
+    const started = Date.parse(s(d.started_at))
+    const dur = Number(d.duration) || sec
+    return {
+      id: s(d.id),
+      endsAt: Number.isFinite(started) ? started + dur * 1000 : null,
+      choices: (Array.isArray(d.choices) ? (d.choices as Json[]) : []).map((c) => ({ id: s(c.id), title: s(c.title) }))
+    }
+  }
+
+  /** Завершить голосование Twitch досрочно (итог остаётся виден на Twitch). */
+  async endPoll(id: string): Promise<void> {
+    const me = this.auth.account('broadcaster')
+    if (!me || !id) return
+    const res = await this.helix('/polls', { method: 'PATCH', body: JSON.stringify({ broadcaster_id: me.id, id, status: 'TERMINATED' }) })
+    if (!res.ok && res.status !== 400) throw new Error(`Twitch не завершил голосование (${res.status})`)
+  }
+
   infoAccess(): 'ok' | 'login' | 'relogin' {
     if (!this.auth.account('broadcaster')) return 'login'
     return this.auth.hasScope('broadcaster', 'channel:manage:broadcast') ? 'ok' : 'relogin'

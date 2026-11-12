@@ -141,12 +141,15 @@ export interface AppSettings {
     goal: GoalOverlaySettings
     /** Розыгрыш: длительность прокрутки ников, через сколько скрыть итог. */
     giveaway: { theme: Theme; fontSize: number; revealSec: number; hideAfterSec: number }
+    /** Голосование: сколько вариантов, что показывать (голоса, доля или обе), подсказку «как голосовать». */
+    vote: { theme: Theme; fontSize: number; count: number; show: 'votes' | 'pct' | 'both'; showHint: boolean }
   }
   float: FloatChatSettings
   auction: AuctionSettings
   /** Колесо: режим, как считать сектора, длительность прокрутки. */
   wheel: { mode: 'normal' | 'elim'; weighting: 'weight' | 'equal'; durationSec: number }
   giveaway: GiveawaySettings
+  vote: VoteSettings
   analytics: AnalyticsSettings
 }
 
@@ -193,6 +196,42 @@ export interface GoalOverlaySettings {
   showTimer: boolean
   /** Праздник при достижении этапа или цели. */
   celebrate: boolean
+}
+
+/** Голосование (варианты и голоса хранятся отдельно, в vote.v1). */
+export interface VoteSettings {
+  /** Голоса из чата: номер, «первый», название (1 голос на зрителя). */
+  chat: boolean
+  /** Сколько ₽ = 1 голос за донат; 0 — донаты не считаются. */
+  rubPerVote: number
+  /** Награда Twitch за баллы, которая даёт голоса (название). Пусто — выкл. */
+  pointsReward: string
+  /** Сколько баллов = 1 голос (не меньше одного голоса за награду). */
+  pointsPerVote: number
+  /** Команда голоса за долгое: «!голос 2». */
+  voteCmd: string
+  /** Команда предложить вариант: «!вариант Игра». Пусто — выкл. */
+  suggestCmd: string
+  /** Награда Twitch за баллы «предложить вариант». Пусто — выкл. */
+  suggestReward: string
+  /** Донат от этой суммы с незнакомым названием — предложение; 0 — выкл. */
+  suggestDonMin: number
+  /** Команда показать долгое на экране. Пусто — выкл. */
+  showCmd: string
+  /** Общий кулдаун команды показа, секунд (на всех зрителей). */
+  showCooldownSec: number
+  /** Долгое появляется само раз в столько минут во время эфира; 0 — выкл. */
+  autoShowMin: number
+  /** На сколько секунд появляется долгое. */
+  showSec: number
+  /** Горячая клавиша показать/спрятать долгое. Пусто — нет. */
+  hotkey: string
+  /** Таймер быстрого по умолчанию, секунд. */
+  defaultSec: number
+  /** Писать в чат о старте и итоге. */
+  announce: boolean
+  startText: string
+  winText: string
 }
 
 /** Правила аукциона (лоты и ставки хранятся отдельно, в auction.v1). */
@@ -272,7 +311,8 @@ export const DEFAULTS: AppSettings = {
     auction: { theme: 'general', fontSize: 24, count: 5, show: 'both', showTimer: true },
     wheel: { theme: 'general', hideAfterSec: 10 },
     goal: { theme: 'general', fontSize: 24, showStages: true, showLast: true, showTop: false, topCount: 3, showTimer: true, celebrate: true },
-    giveaway: { theme: 'general', fontSize: 26, revealSec: 6, hideAfterSec: 30 }
+    giveaway: { theme: 'general', fontSize: 26, revealSec: 6, hideAfterSec: 30 },
+    vote: { theme: 'general', fontSize: 24, count: 6, show: 'both', showHint: true }
   },
   float: { ...chatDefaults(false), fontSize: 18, maxMessages: 12, hideAfterSec: 45, showStatus: true, enabled: false, bgOpacity: 55, bounds: null, look: lookDefaults({ gap: 6, radius: 10, text: textDefaults({ shadow: 6 }) }) },
   auction: { pointsReward: '', pointsPerRub: 100, autoLotMin: 300, extend: true, extendBelowSec: 60, extendAddSec: 30, defaultMin: 10 },
@@ -281,10 +321,17 @@ export const DEFAULTS: AppSettings = {
     keyword: '!участвую', rubPerTicket: 100, maxTickets: 20, defaultMin: 3, winners: 1, answerSec: 60, announce: true,
     startText: 'Розыгрыш: {приз}! Пишите {слово} в чат, чтобы участвовать.', winText: 'Победитель розыгрыша «{приз}»: {победители}! Напишите в чат 🎉'
   },
+  vote: {
+    chat: true, rubPerVote: 100, pointsReward: '', pointsPerVote: 1000, voteCmd: '!голос', suggestCmd: '!вариант', suggestReward: '', suggestDonMin: 0,
+    showCmd: '!голосование', showCooldownSec: 120, autoShowMin: 20, showSec: 30, hotkey: '', defaultSec: 90, announce: true,
+    startText: 'Голосование: {вопрос} {варианты} — пишите номер в чат!', winText: 'Итог голосования «{вопрос}»: {победитель} ({голоса})'
+  },
   analytics: { chat: true, online: true, coreMin: 3, ignore: 'nightbot, streamelements, streamlabs, moobot, fossabot, wizebot, botrix, kicklet, kickbot' }
 }
 
 const theme = (v: unknown, d: Theme): Theme => (v === 'general' || v === 'campfire' ? v : d)
+/** Как HOTKEY_RE в rules.ts (свой экземпляр: rules.ts сам импортирует настройки). */
+const VOTE_HOTKEY_RE = /^(?:(?:Ctrl|Alt|Shift)\+){1,3}(?:[A-Z0-9]|F(?:[1-9]|1\d|2[0-4])|num[0-9])$|^F(?:[1-9]|1\d|2[0-4])$/
 const bool = (v: unknown, d: boolean): boolean => (typeof v === 'boolean' ? v : d)
 const int = (v: unknown, d: number, min: number, max: number): number =>
   typeof v === 'number' && Number.isFinite(v) ? Math.min(max, Math.max(min, Math.round(v))) : d
@@ -467,6 +514,14 @@ export function sanitize(input: unknown, base: AppSettings = DEFAULTS): AppSetti
         const o = obj(ov.giveaway)
         const b = base.overlays.giveaway ?? DEFAULTS.overlays.giveaway
         return { theme: theme(o.theme, b.theme), fontSize: int(o.fontSize, b.fontSize, 12, 72), revealSec: int(o.revealSec, b.revealSec, 2, 20), hideAfterSec: int(o.hideAfterSec, b.hideAfterSec, 0, 600) }
+      })(),
+      vote: (() => {
+        const o = obj(ov.vote)
+        const b = base.overlays.vote ?? DEFAULTS.overlays.vote
+        return {
+          theme: theme(o.theme, b.theme), fontSize: int(o.fontSize, b.fontSize, 12, 72), count: int(o.count, b.count, 1, 20),
+          show: o.show === 'votes' || o.show === 'pct' || o.show === 'both' ? o.show : b.show, showHint: bool(o.showHint, b.showHint)
+        }
       })()
     },
     float: float(i.float, base.float ?? DEFAULTS.float),
@@ -480,6 +535,33 @@ export function sanitize(input: unknown, base: AppSettings = DEFAULTS): AppSetti
         defaultMin: int(o.defaultMin, b.defaultMin, 0, 600),
         winners: int(o.winners, b.winners, 1, 10),
         answerSec: int(o.answerSec, b.answerSec, 10, 600),
+        announce: bool(o.announce, b.announce),
+        startText: text(o.startText, b.startText, 300),
+        winText: text(o.winText, b.winText, 300)
+      }
+    })(),
+    vote: (() => {
+      const o = obj(i.vote)
+      const b = base.vote ?? DEFAULTS.vote
+      const cmd = (v: unknown, d: string): string => {
+        const x = text(v, d, 30).trim().toLowerCase()
+        return x && !/\s/.test(x) ? x : x ? d : ''
+      }
+      return {
+        chat: bool(o.chat, b.chat),
+        rubPerVote: int(o.rubPerVote, b.rubPerVote, 0, 10_000_000),
+        pointsReward: text(o.pointsReward, b.pointsReward, 45).trim(),
+        pointsPerVote: int(o.pointsPerVote, b.pointsPerVote, 1, 10_000_000),
+        voteCmd: cmd(o.voteCmd, b.voteCmd) || DEFAULTS.vote.voteCmd,
+        suggestCmd: cmd(o.suggestCmd, b.suggestCmd),
+        suggestReward: text(o.suggestReward, b.suggestReward, 45).trim(),
+        suggestDonMin: int(o.suggestDonMin, b.suggestDonMin, 0, 10_000_000),
+        showCmd: cmd(o.showCmd, b.showCmd),
+        showCooldownSec: int(o.showCooldownSec, b.showCooldownSec, 0, 3600),
+        autoShowMin: int(o.autoShowMin, b.autoShowMin, 0, 600),
+        showSec: int(o.showSec, b.showSec, 5, 600),
+        hotkey: typeof o.hotkey === 'string' ? (o.hotkey === '' || VOTE_HOTKEY_RE.test(o.hotkey) ? o.hotkey : b.hotkey) : b.hotkey,
+        defaultSec: int(o.defaultSec, b.defaultSec, 0, 86_400),
         announce: bool(o.announce, b.announce),
         startText: text(o.startText, b.startText, 300),
         winText: text(o.winText, b.winText, 300)
