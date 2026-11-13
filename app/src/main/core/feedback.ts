@@ -9,7 +9,7 @@ import type { ConnStatus } from './types'
  */
 
 /** Куда приходят письма. Поменять адрес — только здесь. */
-export const FEEDBACK_EMAIL = 'erronsivorstv@gmail.com'
+export const FEEDBACK_EMAIL = 'crossemberwork@gmail.com'
 
 export const FEEDBACK_KINDS = { bug: 'Ошибка', idea: 'Предложение', other: 'Другое' } as const
 export type FeedbackKind = keyof typeof FEEDBACK_KINDS
